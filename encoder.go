@@ -8,10 +8,15 @@ import (
 	"io"
 
 	"github.com/OhanaFS/stitch/header"
+	"github.com/OhanaFS/stitch/reedsolomon"
+	seekable "github.com/SaveTheRbtz/zstd-seekable-format-go"
 	"github.com/hashicorp/vault/shamir"
-	"github.com/klauspost/reedsolomon"
-	// "github.com/klauspost/compress/zstd"
-	// seekable "github.com/SaveTheRbtz/zstd-seekable-format-go"
+	"github.com/klauspost/compress/zstd"
+)
+
+const (
+	// rsBlockSize is the size of a Reed-Solomon block.
+	rsBlockSize = 4096
 )
 
 var (
@@ -99,11 +104,21 @@ func (e *Encoder) Encode(data io.Reader, shards []io.WriteSeeker, key []byte, iv
 
 	// Prepare headers for each shard.
 	headers := make([]header.Header, totalShards)
+	headerOffsets := make([]int64, totalShards)
 	for i := 0; i < totalShards; i++ {
 		headers[i] = header.Header{
-			ShardIndex: uint8(i),
-			FileKey:    fileKeySplit[i],
-			FileIV:     fileIVSplit[i],
+			ShardIndex:  i,
+			ShardCount:  totalShards,
+			FileKey:     fileKeySplit[i],
+			FileIV:      fileIVSplit[i],
+			FileHash:    make([]byte, 32),
+			FileSize:    0,
+			RSBlockSize: rsBlockSize,
+		}
+
+		// Get the current position of the writer.
+		if headerOffsets[i], err = shards[i].Seek(0, io.SeekCurrent); err != nil {
+			return err
 		}
 
 		// Write the header to the shard.
@@ -117,7 +132,19 @@ func (e *Encoder) Encode(data io.Reader, shards []io.WriteSeeker, key []byte, iv
 	}
 
 	// Prepare the Reed-Solomon encoder.
-	encRS, err := reedsolomon.New(int(e.opts.DataShards), int(e.opts.ParityShards))
+	encRS, err := reedsolomon.New(
+		int(e.opts.DataShards), int(e.opts.ParityShards), rsBlockSize,
+	)
+	if err != nil {
+		return err
+	}
+
+	// Prepare the zstd compressor.
+	encZstd, err := zstd.NewWriter(nil)
+	if err != nil {
+		return err
+	}
+	_, err = seekable.NewWriter(io.Discard, encZstd)
 	if err != nil {
 		return err
 	}

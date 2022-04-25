@@ -10,9 +10,9 @@ import (
 // Header describes the header of a shard.
 type Header struct {
 	// ShardIndex is the index of the shard.
-	ShardIndex uint8 `json:"i"`
+	ShardIndex int `json:"i"`
 	// ShardCount is the total number of shards.
-	ShardCount uint8 `json:"c"`
+	ShardCount int `json:"c"`
 	// FileHash is the SHA256 hash of the whole file plaintext.
 	FileHash []byte `json:"h"`
 	// FileKey is one shard of the AES key used to encrypt the file plaintext. It
@@ -22,6 +22,8 @@ type Header struct {
 	FileIV []byte `json:"n"`
 	// FileSize is the size of the file plaintext.
 	FileSize uint64 `json:"s"`
+	// RSBlockSize is the size of the Reed-Solomon block.
+	RSBlockSize int `json:"b"`
 }
 
 // HeaderSize is the fixed size allocated for the header.

@@ -24,6 +24,9 @@ func (e ErrCorruptionDetected) Error() string {
 type UnboundedStreamEncoder interface {
 	Split(data io.Reader, dst []io.Writer) error
 	Join(dst io.Writer, shards []io.Reader, outSize int64) error
+
+	NewWriter(dst []io.Writer) io.WriteCloser
+	NewReader(shards []io.Reader, outSize int64) io.ReadCloser
 }
 
 type encoder struct {
@@ -146,8 +149,11 @@ func (e *encoder) Join(dst io.Writer, shards []io.Reader, outSize int64) error {
 	bytesLeft := outSize
 	// Keep track of the number of blocks that are corrupted.
 	brokenBlocks := 0
+	currentBlock := 0
 
 	for {
+		currentBlock += 1
+
 		// Read shard blocks.
 		for i, shard := range shards {
 			if shard == nil {
@@ -155,11 +161,11 @@ func (e *encoder) Join(dst io.Writer, shards []io.Reader, outSize int64) error {
 			}
 
 			if _, err := shard.Read(bufs[i]); err != nil {
-				return fmt.Errorf("failed to read from shard %d: %s", i, err)
+				return fmt.Errorf("failed to read from shard %d, block %d: %w", i, currentBlock, err)
 			}
 
 			if _, err := shard.Read(hashes[i]); err != nil {
-				return fmt.Errorf("failed to read hash from shard %d: %s", i, err)
+				return fmt.Errorf("failed to read hash from shard %d, block %d: %w", i, currentBlock, err)
 			}
 
 			// Verify the hash.
@@ -214,4 +220,31 @@ func (e *encoder) Join(dst io.Writer, shards []io.Reader, outSize int64) error {
 	}
 
 	return nil
+}
+
+// NewWriter wraps the Split method and returns a new io.WriteCloser.
+func (e *encoder) NewWriter(dst []io.Writer) io.WriteCloser {
+	r, w := io.Pipe()
+	go func() {
+		if err := e.Split(r, dst); err != nil {
+			w.CloseWithError(err)
+		} else {
+			w.Close()
+		}
+	}()
+	return w
+}
+
+// NewReader wraps the Join method and returns a new io.ReadCloser.
+func (e *encoder) NewReader(shards []io.Reader, outSize int64) io.ReadCloser {
+	r, w := io.Pipe()
+	go func() {
+		if err := e.Join(w, shards, outSize); err != nil {
+			fmt.Printf("Join failed: %s\n", err)
+			r.CloseWithError(err)
+		} else {
+			r.Close()
+		}
+	}()
+	return r
 }
