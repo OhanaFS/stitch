@@ -69,7 +69,7 @@ func TestReedSolomon(t *testing.T) {
 	// Corrupt one of the shards
 	readers = make([]io.Reader, 7)
 	for i := 0; i < 7; i++ {
-		if i == 3 {
+		if i == 5 {
 			// Seek to the beginning of the buffer
 			n, err := shards[i].Seek(0, io.SeekStart)
 			assert.Nil(err)
@@ -88,7 +88,7 @@ func TestReedSolomon(t *testing.T) {
 	// Try to decode the data
 	dest = &writerseeker.WriterSeeker{}
 	err = rs.Join(dest, readers, int64(len(data)))
-	assert.Nil(err)
+	assert.Equal(reedsolomon.ErrCorruptionDetected{BlockCount: 1}, err)
 }
 
 func TestReedSolomonLarge(t *testing.T) {
@@ -106,7 +106,6 @@ func TestReedSolomonLarge(t *testing.T) {
 	data := make([]byte, blockSize*10)
 	_, err = rand.Read(data)
 	assert.NoError(err)
-	t.Logf("Using %d bytes of data", len(data))
 
 	// Create buffers to hold the shards
 	shards := make([]writerseeker.WriterSeeker, totalShards)

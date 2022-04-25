@@ -9,6 +9,16 @@ import (
 	rs "github.com/klauspost/reedsolomon"
 )
 
+type ErrCorruptionDetected struct {
+	BlockCount int
+}
+
+var _ error = ErrCorruptionDetected{}
+
+func (e ErrCorruptionDetected) Error() string {
+	return fmt.Sprintf("detected corruption in %d blocks", e.BlockCount)
+}
+
 // UnboundedStreamEncoder is an interface to encode Reed-Solomon parity sets
 // from a stream of unknown length.
 type UnboundedStreamEncoder interface {
@@ -54,7 +64,8 @@ func (e *encoder) Split(data io.Reader, dst []io.Writer) error {
 		return fmt.Errorf("expected %d shards, got %d", totalShards, len(dst))
 	}
 
-	buf := make([]byte, e.blockSize*e.dataShards)
+	readSize := e.blockSize * e.dataShards
+	buf := make([]byte, readSize)
 	enc, err := rs.New(e.dataShards, e.parityShards)
 	if err != nil {
 		return err
@@ -71,9 +82,8 @@ func (e *encoder) Split(data io.Reader, dst []io.Writer) error {
 		}
 
 		// If block is smaller than blockSize*dataShards, pad it.
-		expected := e.blockSize * e.dataShards
-		if n < expected {
-			buf = append(buf[:n], make([]byte, expected-n)...)
+		if n < readSize {
+			buf = append(buf[:n], make([]byte, readSize-n)...)
 		}
 
 		// Split the block into shards.
@@ -106,7 +116,9 @@ func (e *encoder) Split(data io.Reader, dst []io.Writer) error {
 	return nil
 }
 
-// Join reconstructs the data from the shards given to it.
+// Join reconstructs the data from the shards given to it. If it detects that
+// some of the shards are corrupted, but is able to correct them, it will return
+// ErrCorruptionDetected.
 func (e *encoder) Join(dst io.Writer, shards []io.Reader, outSize int64) error {
 	totalShards := e.dataShards + e.parityShards
 	if len(shards) != totalShards {
@@ -132,6 +144,8 @@ func (e *encoder) Join(dst io.Writer, shards []io.Reader, outSize int64) error {
 
 	// Keep track of the number of bytes left to be written to the output.
 	bytesLeft := outSize
+	// Keep track of the number of blocks that are corrupted.
+	brokenBlocks := 0
 
 	for {
 		// Read shard blocks.
@@ -154,6 +168,7 @@ func (e *encoder) Join(dst io.Writer, shards []io.Reader, outSize int64) error {
 				// If hashes don't match, truncate the shard so that `enc.Reconstruct`
 				// will regenerate it.
 				bufs[i] = []byte{}
+				brokenBlocks++
 			}
 		}
 
@@ -189,6 +204,12 @@ func (e *encoder) Join(dst io.Writer, shards []io.Reader, outSize int64) error {
 		// Reset the buffers.
 		for i := range bufs {
 			bufs[i] = make([]byte, e.blockSize)
+		}
+	}
+
+	if brokenBlocks > 0 {
+		return ErrCorruptionDetected{
+			BlockCount: brokenBlocks,
 		}
 	}
 
