@@ -103,6 +103,10 @@ func (e *encoder) Join(dst io.Writer, shards []io.Reader, outSize int64) error {
 	}
 
 	bufs := make([][]byte, len(shards))
+	for i := range bufs {
+		bufs[i] = make([]byte, e.blockSize)
+	}
+
 	enc, err := rs.New(e.dataShards, e.parityShards)
 	if err != nil {
 		return err
@@ -123,8 +127,6 @@ func (e *encoder) Join(dst io.Writer, shards []io.Reader, outSize int64) error {
 				return fmt.Errorf("failed to read from shard %d: %s", i, err)
 			}
 		}
-
-		fmt.Printf("%v\n", bufs)
 
 		// Verify the shards.
 		ok, err := enc.Verify(bufs)
@@ -150,9 +152,15 @@ func (e *encoder) Join(dst io.Writer, shards []io.Reader, outSize int64) error {
 		}
 
 		// Update the number of bytes left.
-		bytesLeft -= blockSize
+		bytesLeft -= blockSize * int64(e.dataShards)
+		fmt.Printf("Bytes left: %d\n", bytesLeft)
 		if bytesLeft <= 0 {
 			break
+		}
+
+		// Reset the buffers.
+		for i := range bufs {
+			bufs[i] = make([]byte, e.blockSize)
 		}
 	}
 
