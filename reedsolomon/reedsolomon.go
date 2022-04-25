@@ -47,7 +47,7 @@ func New(dataShards, parityShards, blockSize int) (UnboundedStreamEncoder, error
 // * The size of the original data
 // * The order of the shards
 //
-// This function also adds a hash every `blockSize` bytes.
+// This function also adds a sha256 hash every `blockSize` bytes.
 func (e *encoder) Split(data io.Reader, dst []io.Writer) error {
 	totalShards := e.dataShards + e.parityShards
 	if len(dst) != totalShards {
@@ -70,8 +70,14 @@ func (e *encoder) Split(data io.Reader, dst []io.Writer) error {
 			return err
 		}
 
+		// If block is smaller than blockSize*dataShards, pad it.
+		expected := e.blockSize * e.dataShards
+		if n < expected {
+			buf = append(buf[:n], make([]byte, expected-n)...)
+		}
+
 		// Split the block into shards.
-		shards, err := enc.Split(buf[:n])
+		shards, err := enc.Split(buf)
 		if err != nil {
 			return err
 		}
@@ -137,6 +143,7 @@ func (e *encoder) Join(dst io.Writer, shards []io.Reader, outSize int64) error {
 			if _, err := shard.Read(bufs[i]); err != nil {
 				return fmt.Errorf("failed to read from shard %d: %s", i, err)
 			}
+
 			if _, err := shard.Read(hashes[i]); err != nil {
 				return fmt.Errorf("failed to read hash from shard %d: %s", i, err)
 			}
