@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"io"
 	"testing"
+	"time"
 
 	"github.com/orcaman/writerseeker"
 	"github.com/stretchr/testify/assert"
@@ -18,25 +19,20 @@ func TestReedSolomon(t *testing.T) {
 	blockSize := 32
 	dataShards := 5
 	parityShards := 2
+
 	totalShards := dataShards + parityShards
+	data := makeRandomData(t, blockSize*10)
+	shards, writers := makeShardBuffer(totalShards)
 
 	rs, err := reedsolomon.New(dataShards, parityShards, blockSize)
 	assert.Nil(err)
-
-	// Generate some data
-	data := makeRandomData(t, blockSize*10)
-
-	// Create buffers to hold the shards
-	shards, writers := makeShardBuffer(totalShards)
 
 	// Encode the data
 	err = rs.Split(bytes.NewReader(data), writers)
 	assert.Nil(err)
 
-	// Grab the reader
-	readers := getReadersFromShards(t, blockSize, shards)
-
 	// Try to decode the data
+	readers := getReadersFromShards(t, blockSize, shards)
 	dest := &writerseeker.WriterSeeker{}
 	err = rs.Join(dest, readers, int64(len(data)))
 	assert.Nil(err)
@@ -77,16 +73,13 @@ func TestReedSolomonLarge(t *testing.T) {
 	blockSize := 1024 * 1024
 	dataShards := 17
 	parityShards := 3
+
 	totalShards := dataShards + parityShards
+	data := makeRandomData(t, blockSize*10)
+	shards, writers := makeShardBuffer(totalShards)
 
 	rs, err := reedsolomon.New(dataShards, parityShards, blockSize)
 	assert.Nil(err)
-
-	// Generate some data
-	data := makeRandomData(t, blockSize*10)
-
-	// Create buffers to hold the shards
-	shards, writers := makeShardBuffer(totalShards)
 
 	// Encode the data
 	err = rs.Split(bytes.NewReader(data), writers)
@@ -107,24 +100,19 @@ func TestReedSolomonLarge(t *testing.T) {
 func TestReaderWriter(t *testing.T) {
 	assert := assert.New(t)
 
-	blockSize := 1024
-	dataShards := 3
-	parityShards := 1
+	blockSize := 32
+	dataShards := 5
+	parityShards := 2
+
 	totalShards := dataShards + parityShards
+	data := makeRandomData(t, blockSize*10)
+	shards, writers := makeShardBuffer(totalShards)
 
 	rs, err := reedsolomon.New(dataShards, parityShards, blockSize)
 	assert.Nil(err)
 
-	// Generate some data
-	data := makeRandomData(t, blockSize*10)
-
-	// Create buffers to hold the shards
-	shards, writers := makeShardBuffer(totalShards)
-
-	// Grab the writer
-	rsWriter := rs.NewWriter(writers)
-
 	// Write the data
+	rsWriter := rs.NewWriter(writers)
 	n, err := rsWriter.Write(data)
 	assert.Nil(err)
 	assert.Equal(len(data), n)
@@ -132,6 +120,9 @@ func TestReaderWriter(t *testing.T) {
 	// Close the writer
 	err = rsWriter.Close()
 	assert.Nil(err)
+
+	// Wait for the shards to be written
+	time.Sleep(time.Millisecond * 100)
 
 	// Grab the reader
 	readers := getReadersFromShards(t, blockSize, shards)

@@ -240,10 +240,9 @@ func (e *encoder) NewReader(shards []io.Reader, outSize int64) io.ReadCloser {
 	r, w := io.Pipe()
 	go func() {
 		if err := e.Join(w, shards, outSize); err != nil {
-			fmt.Printf("Join failed: %s\n", err)
-			r.CloseWithError(err)
+			w.CloseWithError(err)
 		} else {
-			r.Close()
+			w.Close()
 		}
 	}()
 	return r
