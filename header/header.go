@@ -3,89 +3,88 @@ package header
 import (
 	"encoding"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 )
 
 // Header describes the header of a shard.
 type Header struct {
-	// Magic is an arbitrary constant that identifies the file as a shard.
-	Magic [4]byte
-	// Version is the version of the shard format.
-	Version [2]byte
 	// ShardIndex is the index of the shard.
-	ShardIndex uint8
+	ShardIndex uint8 `json:"i"`
+	// ShardCount is the total number of shards.
+	ShardCount uint8 `json:"c"`
 	// FileHash is the SHA256 hash of the whole file plaintext.
-	FileHash [32]byte
-	// FileKey is one shard of the AES key used to encrypt the file plaintext.
-	FileKey [32]byte
+	FileHash []byte `json:"h"`
+	// FileKey is one shard of the AES key used to encrypt the file plaintext. It
+	// is 33 bytes long to allow for the overhead of Shamir's Secret Sharing.
+	FileKey []byte `json:"k"`
+	// FileIV is the AES initialization vector used to encrypt the file plaintext.
+	FileIV []byte `json:"n"`
 	// FileSize is the size of the file plaintext.
-	FileSize uint64
-	// reserved is reserved for future use. It should be 49 bytes of zero to pad
-	// the header to 128 bytes.
-	reserved [49]byte
+	FileSize uint64 `json:"s"`
 }
 
-// HeaderSize is the size of the header in bytes.
-const HeaderSize = 4 + 2 + 1 + 32 + 32 + 8 + 49
+// HeaderSize is the fixed size allocated for the header.
+const HeaderSize = 1024
 
 var _ encoding.BinaryMarshaler = (*Header)(nil)
 var _ encoding.BinaryUnmarshaler = (*Header)(nil)
 
 var (
-	MagicBytes     = [4]byte{'S', 'T', 'C', 'H'}
-	CurrentVersion = [2]byte{0x00, 0x01}
+	MagicBytes = []byte("STITCHv1")
 
 	ErrInvalidHeaderSize = errors.New("invalid header size")
 	ErrUnrecognizedMagic = errors.New("unrecognized magic bytes")
-	ErrVersionMismatch   = errors.New("version mismatch")
 )
 
 func NewHeader() *Header {
-	return &Header{
-		Magic:   MagicBytes,
-		Version: CurrentVersion,
-	}
+	return &Header{}
 }
 
 // MarshalBinary implements the encoding.BinaryMarshaler interface.
 func (h *Header) MarshalBinary() ([]byte, error) {
-	header := make([]byte, HeaderSize)
-	copy(header[:4], h.Magic[:])
-	copy(header[4:6], h.Version[:])
-	header[6] = h.ShardIndex
-	copy(header[7:39], h.FileHash[:])
-	copy(header[39:71], h.FileKey[:])
-	binary.LittleEndian.PutUint64(header[71:], h.FileSize)
-	return header, nil
+	// Allocate a buffer for the header.
+	buf := make([]byte, HeaderSize)
+
+	// Write the magic bytes.
+	copy(buf[:8], MagicBytes)
+
+	// Marshal the header data as JSON.
+	data, err := json.Marshal(h)
+	if err != nil {
+		return nil, err
+	}
+
+	// Make sure the header data is not too large.
+	if len(data) > HeaderSize-8 {
+		return nil, ErrInvalidHeaderSize
+	}
+
+	// Write the length of the JSON data to the header.
+	binary.LittleEndian.PutUint16(buf[8:10], uint16(len(data)))
+
+	// Copy the JSON data to the header.
+	copy(buf[10:], data)
+
+	return buf, nil
 }
 
 // UnmarshalBinary implements the encoding.BinaryUnmarshaler interface.
 func (h *Header) UnmarshalBinary(data []byte) error {
-	// Make sure the header is the correct size.
-	if len(data) < HeaderSize {
-		return ErrInvalidHeaderSize
-	}
-
 	// Check the magic bytes.
-	for i, b := range data[:4] {
-		if b != h.Magic[i] {
+	for i, b := range MagicBytes {
+		if b != data[i] {
 			return ErrUnrecognizedMagic
 		}
 	}
 
-	// Check the version.
-	for i, b := range data[4:6] {
-		if b != h.Version[i] {
-			return ErrVersionMismatch
-		}
+	// Check the size of the header data.
+	dataLen := binary.LittleEndian.Uint16(data[8:10])
+
+	// Unmarshal the header data.
+	if err := json.Unmarshal(data[10:10+dataLen], h); err != nil {
+		return err
 	}
 
-	// Copy the header data.
-	copy(h.Magic[:], data[:4])
-	copy(h.Version[:], data[4:6])
-	h.ShardIndex = data[6]
-	copy(h.FileHash[:], data[7:39])
-	copy(h.FileKey[:], data[39:71])
-	h.FileSize = binary.LittleEndian.Uint64(data[71:])
 	return nil
 }

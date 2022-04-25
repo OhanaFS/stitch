@@ -1,25 +1,34 @@
-package main
+package stitch
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
 	"errors"
 	"io"
+
+	"github.com/OhanaFS/stitch/header"
+	"github.com/hashicorp/vault/shamir"
+	"github.com/klauspost/reedsolomon"
+	// "github.com/klauspost/compress/zstd"
+	// seekable "github.com/SaveTheRbtz/zstd-seekable-format-go"
 )
 
 var (
-	ErrNonSeekableWriter = errors.New("shards must support seeking")
+	ErrShardCountMismatch = errors.New("shard count mismatch")
+	ErrNonSeekableWriter  = errors.New("shards must support seeking")
 )
 
 type EncoderOptions struct {
 	// DataShards is the total number of shards to split data into.
-	DataShards uint
+	DataShards uint8
 	// ParityShards is the total number of parity shards to create. This also
 	// determines the maximum number of shards that can be lost before the data
 	// cannot be recovered.
-	ParityShards uint
+	ParityShards uint8
 	// KeyThreshold is the minimum number of shards required to reconstruct the
 	// key used to encrypt the data.
-	KeyThreshold uint
+	KeyThreshold uint8
 }
 
 // Encoder takes in a stream of data and shards it into a specified number of
@@ -42,27 +51,76 @@ type Encoder struct {
 }
 
 func NewEncoder(opts *EncoderOptions) *Encoder {
-	return &Encoder{
-		opts: opts,
-	}
+	return &Encoder{opts}
 }
 
-func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte) error {
-	// Check if the writers support seeking.
-	for _, s := range shards {
-		if _, ok := s.(io.Seeker); !ok {
-			return ErrNonSeekableWriter
-		}
+func (e *Encoder) Encode(data io.Reader, shards []io.WriteSeeker, key []byte, iv []byte) error {
+	totalShards := int(e.opts.DataShards + e.opts.ParityShards)
+
+	// Check if the number of output writers matches the number of shards in the
+	// encoder options.
+	if len(shards) != totalShards {
+		return ErrShardCountMismatch
 	}
 
-	// Prepare a 256-bit AES key for use in the data shards.
+	// Prepare a 256-bit AES key to encrypt the data.
 	fileKey := make([]byte, 32)
 	if _, err := rand.Read(fileKey); err != nil {
 		return err
 	}
 
-	// Encrypt the file key with the user-supplied key.
-	// TODO
+	// Prepare a random IV to use for the AES-GCM cipher.
+	fileIV := make([]byte, 12)
+	if _, err := rand.Read(fileIV); err != nil {
+		return err
+	}
+
+	// Encrypt the file key with the user-supplied key and iv.
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return err
+	}
+	fileKeyCiphertext := make([]byte, gcm.Overhead()+len(fileKey))
+	gcm.Seal(fileKeyCiphertext[:0], iv, fileKey, nil)
+
+	// Split the key and IV into shards.
+	fileKeySplit, err := shamir.Split(fileKeyCiphertext, totalShards, int(e.opts.KeyThreshold))
+	if err != nil {
+		return err
+	}
+	fileIVSplit, err := shamir.Split(fileIV, totalShards, int(e.opts.KeyThreshold))
+	if err != nil {
+		return err
+	}
+
+	// Prepare headers for each shard.
+	headers := make([]header.Header, totalShards)
+	for i := 0; i < totalShards; i++ {
+		headers[i] = header.Header{
+			ShardIndex: uint8(i),
+			FileKey:    fileKeySplit[i],
+			FileIV:     fileIVSplit[i],
+		}
+
+		// Write the header to the shard.
+		b, err := headers[i].MarshalBinary()
+		if err != nil {
+			return err
+		}
+		if _, err := shards[i].Write(b); err != nil {
+			return err
+		}
+	}
+
+	// Prepare the Reed-Solomon encoder.
+	encRS, err := reedsolomon.New(int(e.opts.DataShards), int(e.opts.ParityShards))
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
