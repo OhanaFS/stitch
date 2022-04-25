@@ -1,6 +1,8 @@
 package reedsolomon
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"fmt"
 	"io"
 
@@ -45,8 +47,7 @@ func New(dataShards, parityShards, blockSize int) (UnboundedStreamEncoder, error
 // * The size of the original data
 // * The order of the shards
 //
-// Additionally, the caller should keep track of the hash of each shard to
-// detect data corruption.
+// This function also adds a hash every `blockSize` bytes.
 func (e *encoder) Split(data io.Reader, dst []io.Writer) error {
 	totalShards := e.dataShards + e.parityShards
 	if len(dst) != totalShards {
@@ -68,7 +69,6 @@ func (e *encoder) Split(data io.Reader, dst []io.Writer) error {
 			}
 			return err
 		}
-		fmt.Printf("Read %d bytes\n", n)
 
 		// Split the block into shards.
 		shards, err := enc.Split(buf[:n])
@@ -81,14 +81,18 @@ func (e *encoder) Split(data io.Reader, dst []io.Writer) error {
 			return err
 		}
 
-		// Write the shards.
 		for i, shard := range shards {
 			if dst[i] != nil {
-				n, err := dst[i].Write(shard)
-				if err != nil {
+				// Calculate the hash of the shard.
+				hash := sha256.Sum256(shard)
+
+				// Write the shards and the hash to the destination.
+				if _, err := dst[i].Write(shard); err != nil {
 					return err
 				}
-				fmt.Printf("Wrote %d bytes to shard %d\n", n, i)
+				if _, err := dst[i].Write(hash[:]); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -103,11 +107,18 @@ func (e *encoder) Join(dst io.Writer, shards []io.Reader, outSize int64) error {
 		return fmt.Errorf("expected %d shards, got %d", totalShards, len(shards))
 	}
 
+	// Allocate buffers for the data shards.
 	bufs := make([][]byte, len(shards))
 	for i := range bufs {
 		bufs[i] = make([]byte, e.blockSize)
 	}
 
+	hashes := make([][]byte, len(shards))
+	for i := range hashes {
+		hashes[i] = make([]byte, sha256.Size)
+	}
+
+	// Initialize the Reed-Solomon decoder.
 	enc, err := rs.New(e.dataShards, e.parityShards)
 	if err != nil {
 		return err
@@ -123,10 +134,19 @@ func (e *encoder) Join(dst io.Writer, shards []io.Reader, outSize int64) error {
 				continue
 			}
 
-			n, err := shard.Read(bufs[i])
-			fmt.Printf("Read %d bytes from shard %d\n", n, i)
-			if err != nil {
+			if _, err := shard.Read(bufs[i]); err != nil {
 				return fmt.Errorf("failed to read from shard %d: %s", i, err)
+			}
+			if _, err := shard.Read(hashes[i]); err != nil {
+				return fmt.Errorf("failed to read hash from shard %d: %s", i, err)
+			}
+
+			// Verify the hash.
+			hash := sha256.Sum256(bufs[i])
+			if !bytes.Equal(hashes[i], hash[:]) {
+				// If hashes don't match, truncate the shard so that `enc.Reconstruct`
+				// will regenerate it.
+				bufs[i] = []byte{}
 			}
 		}
 
@@ -142,8 +162,6 @@ func (e *encoder) Join(dst io.Writer, shards []io.Reader, outSize int64) error {
 			if ok, err = enc.Verify(bufs); !ok {
 				return fmt.Errorf("verify failed after reconstruct, data likely corrupted: %s", err)
 			}
-		} else {
-			fmt.Printf("Verified %d shards\n", len(bufs))
 		}
 
 		// Join the shards.
@@ -151,14 +169,12 @@ func (e *encoder) Join(dst io.Writer, shards []io.Reader, outSize int64) error {
 		if bytesLeft < blockSize {
 			blockSize = bytesLeft
 		}
-		fmt.Printf("Joining %d bytes\n", blockSize)
 		if err = enc.Join(dst, bufs, int(blockSize)); err != nil {
 			return fmt.Errorf("join failed: %s", err)
 		}
 
 		// Update the number of bytes left.
 		bytesLeft -= blockSize
-		fmt.Printf("Bytes left: %d\n", bytesLeft)
 		if bytesLeft <= 0 {
 			break
 		}

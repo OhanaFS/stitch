@@ -24,7 +24,7 @@ func TestReedSolomon(t *testing.T) {
 	for i := 0; i < len(data); i++ {
 		data[i] = byte(i)
 	}
-	t.Logf("Using %d bytes of data: %v", len(data), data)
+	t.Logf("Using %d bytes of data", len(data))
 
 	// Create buffers to hold the shards
 	shards := make([]writerseeker.WriterSeeker, 7)
@@ -48,7 +48,6 @@ func TestReedSolomon(t *testing.T) {
 		b, err := ioutil.ReadAll(shards[i].BytesReader())
 		assert.Nil(err)
 		assert.Greater(len(b), 1)
-		t.Logf("Shard %d: %d bytes", i, len(b))
 
 		n, err = shards[i].Seek(0, io.SeekStart)
 		assert.Nil(err)
@@ -65,4 +64,28 @@ func TestReedSolomon(t *testing.T) {
 	b, err := ioutil.ReadAll(dest.BytesReader())
 	assert.Nil(err)
 	assert.Equal(data, b)
+
+	// Corrupt one of the shards
+	readers = make([]io.Reader, 7)
+	for i := 0; i < 7; i++ {
+		if i == 3 {
+			// Seek to the beginning of the buffer
+			n, err := shards[i].Seek(0, io.SeekStart)
+			assert.Nil(err)
+			assert.Equal(int64(0), n)
+
+			// Corrupt the data
+			shards[i].Write([]byte("never gonna give you up"))
+		}
+
+		n, err := shards[i].Seek(0, io.SeekStart)
+		assert.Nil(err)
+		assert.Equal(int64(0), n)
+		readers[i] = shards[i].BytesReader()
+	}
+
+	// Try to decode the data
+	dest = &writerseeker.WriterSeeker{}
+	err = rs.Join(dest, readers, int64(len(data)))
+	assert.Nil(err)
 }
