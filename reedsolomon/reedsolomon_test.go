@@ -2,7 +2,6 @@ package reedsolomon_test
 
 import (
 	"bytes"
-	"crypto/rand"
 	"io"
 	"io/ioutil"
 	"testing"
@@ -16,14 +15,16 @@ import (
 func TestReedSolomon(t *testing.T) {
 	assert := assert.New(t)
 
-	rs, err := reedsolomon.New(5, 2, 1024*1024)
+	blockSize := 32
+	rs, err := reedsolomon.New(5, 2, blockSize)
 	assert.Nil(err)
 
 	// Generate some data
-	dataLen := 1024*1024*10 - 1024
-	data := make([]byte, dataLen)
-	_, err = rand.Read(data)
-	assert.Nil(err)
+	data := make([]byte, blockSize*10)
+	for i := 0; i < len(data); i++ {
+		data[i] = byte(i)
+	}
+	t.Logf("Using %d bytes of data: %v", len(data), data)
 
 	// Create buffers to hold the shards
 	shards := make([]writerseeker.WriterSeeker, 7)
@@ -57,6 +58,11 @@ func TestReedSolomon(t *testing.T) {
 
 	// Try to decode the data
 	dest := &writerseeker.WriterSeeker{}
-	err = rs.Join(dest, readers, int64(dataLen))
+	err = rs.Join(dest, readers, int64(len(data)))
 	assert.Nil(err)
+
+	// Check that the data is correct
+	b, err := ioutil.ReadAll(dest.BytesReader())
+	assert.Nil(err)
+	assert.Equal(data, b)
 }

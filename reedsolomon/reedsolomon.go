@@ -53,7 +53,7 @@ func (e *encoder) Split(data io.Reader, dst []io.Writer) error {
 		return fmt.Errorf("expected %d shards, got %d", totalShards, len(dst))
 	}
 
-	buf := make([]byte, e.blockSize)
+	buf := make([]byte, e.blockSize*e.dataShards)
 	enc, err := rs.New(e.dataShards, e.parityShards)
 	if err != nil {
 		return err
@@ -68,6 +68,7 @@ func (e *encoder) Split(data io.Reader, dst []io.Writer) error {
 			}
 			return err
 		}
+		fmt.Printf("Read %d bytes\n", n)
 
 		// Split the block into shards.
 		shards, err := enc.Split(buf[:n])
@@ -112,6 +113,7 @@ func (e *encoder) Join(dst io.Writer, shards []io.Reader, outSize int64) error {
 		return err
 	}
 
+	// Keep track of the number of bytes left to be written to the output.
 	bytesLeft := outSize
 
 	for {
@@ -140,19 +142,22 @@ func (e *encoder) Join(dst io.Writer, shards []io.Reader, outSize int64) error {
 			if ok, err = enc.Verify(bufs); !ok {
 				return fmt.Errorf("verify failed after reconstruct, data likely corrupted: %s", err)
 			}
+		} else {
+			fmt.Printf("Verified %d shards\n", len(bufs))
 		}
 
 		// Join the shards.
-		blockSize := int64(e.blockSize)
+		blockSize := int64(e.blockSize) * int64(e.dataShards)
 		if bytesLeft < blockSize {
 			blockSize = bytesLeft
 		}
+		fmt.Printf("Joining %d bytes\n", blockSize)
 		if err = enc.Join(dst, bufs, int(blockSize)); err != nil {
 			return fmt.Errorf("join failed: %s", err)
 		}
 
 		// Update the number of bytes left.
-		bytesLeft -= blockSize * int64(e.dataShards)
+		bytesLeft -= blockSize
 		fmt.Printf("Bytes left: %d\n", bytesLeft)
 		if bytesLeft <= 0 {
 			break
