@@ -9,6 +9,12 @@ import (
 	rs "github.com/klauspost/reedsolomon"
 )
 
+const (
+	// BlockOverhead specifies the number of extra bytes required to encode a
+	// block of data.
+	BlockOverhead = sha256.Size
+)
+
 type ErrCorruptionDetected struct {
 	BlockCount int
 }
@@ -19,34 +25,18 @@ func (e ErrCorruptionDetected) Error() string {
 	return fmt.Sprintf("detected corruption in %d blocks", e.BlockCount)
 }
 
-// UnboundedStreamEncoder is an interface to encode Reed-Solomon parity sets
-// from a stream of unknown length.
-type UnboundedStreamEncoder interface {
-	Split(data io.Reader, dst []io.Writer) error
-	Join(dst io.Writer, shards []io.Reader, outSize int64) error
-
-	NewWriter(dst []io.Writer) io.WriteCloser
-	NewReader(shards []io.Reader, outSize int64) io.ReadCloser
+// Encoder encodes Reed-Solomon parity sets from a stream of unknown length.
+type Encoder struct {
+	DataShards   int
+	ParityShards int
+	BlockSize    int
 }
 
-type encoder struct {
-	dataShards   int
-	parityShards int
-	blockSize    int
-	rsEncoder    rs.StreamEncoder
-}
-
-func New(dataShards, parityShards, blockSize int) (UnboundedStreamEncoder, error) {
-	rsEncoder, err := rs.NewStream(dataShards, parityShards)
-	if err != nil {
-		return nil, err
-	}
-
-	return &encoder{
+func NewEncoder(dataShards, parityShards, blockSize int) (*Encoder, error) {
+	return &Encoder{
 		dataShards,
 		parityShards,
 		blockSize,
-		rsEncoder,
 	}, nil
 }
 
@@ -61,15 +51,15 @@ func New(dataShards, parityShards, blockSize int) (UnboundedStreamEncoder, error
 // * The order of the shards
 //
 // This function also adds a sha256 hash every `blockSize` bytes.
-func (e *encoder) Split(data io.Reader, dst []io.Writer) error {
-	totalShards := e.dataShards + e.parityShards
+func (e *Encoder) Split(data io.Reader, dst []io.Writer) error {
+	totalShards := e.DataShards + e.ParityShards
 	if len(dst) != totalShards {
 		return fmt.Errorf("expected %d shards, got %d", totalShards, len(dst))
 	}
 
-	readSize := e.blockSize * e.dataShards
+	readSize := e.BlockSize * e.DataShards
 	buf := make([]byte, readSize)
-	enc, err := rs.New(e.dataShards, e.parityShards)
+	enc, err := rs.New(e.DataShards, e.ParityShards)
 	if err != nil {
 		return err
 	}
@@ -120,10 +110,10 @@ func (e *encoder) Split(data io.Reader, dst []io.Writer) error {
 }
 
 // Join reconstructs the data from the shards given to it. If it detects that
-// some of the shards are corrupted, but is able to correct them, it will return
+// some of the shards are corrupted, but is able to correct them, it should return
 // ErrCorruptionDetected.
-func (e *encoder) Join(dst io.Writer, shards []io.Reader, outSize int64) error {
-	totalShards := e.dataShards + e.parityShards
+func (e *Encoder) Join(dst io.Writer, shards []io.Reader, outSize int64) error {
+	totalShards := e.DataShards + e.ParityShards
 	if len(shards) != totalShards {
 		return fmt.Errorf("expected %d shards, got %d", totalShards, len(shards))
 	}
@@ -131,7 +121,7 @@ func (e *encoder) Join(dst io.Writer, shards []io.Reader, outSize int64) error {
 	// Allocate buffers for the data shards.
 	bufs := make([][]byte, len(shards))
 	for i := range bufs {
-		bufs[i] = make([]byte, e.blockSize)
+		bufs[i] = make([]byte, e.BlockSize)
 	}
 
 	hashes := make([][]byte, len(shards))
@@ -140,7 +130,7 @@ func (e *encoder) Join(dst io.Writer, shards []io.Reader, outSize int64) error {
 	}
 
 	// Initialize the Reed-Solomon decoder.
-	enc, err := rs.New(e.dataShards, e.parityShards)
+	enc, err := rs.New(e.DataShards, e.ParityShards)
 	if err != nil {
 		return err
 	}
@@ -149,7 +139,7 @@ func (e *encoder) Join(dst io.Writer, shards []io.Reader, outSize int64) error {
 	bytesLeft := outSize
 	// Keep track of the number of blocks that are corrupted.
 	brokenBlocks := 0
-	currentBlock := 0
+	currentBlock := -1
 
 	for {
 		currentBlock += 1
@@ -159,6 +149,8 @@ func (e *encoder) Join(dst io.Writer, shards []io.Reader, outSize int64) error {
 			if shard == nil {
 				continue
 			}
+
+			fmt.Printf("Reading shard %d, block %d\n", i, currentBlock)
 
 			if _, err := shard.Read(bufs[i]); err != nil {
 				return fmt.Errorf("failed to read from shard %d, block %d: %w", i, currentBlock, err)
@@ -193,7 +185,7 @@ func (e *encoder) Join(dst io.Writer, shards []io.Reader, outSize int64) error {
 		}
 
 		// Join the shards.
-		blockSize := int64(e.blockSize) * int64(e.dataShards)
+		blockSize := int64(e.BlockSize) * int64(e.DataShards)
 		if bytesLeft < blockSize {
 			blockSize = bytesLeft
 		}
@@ -209,7 +201,7 @@ func (e *encoder) Join(dst io.Writer, shards []io.Reader, outSize int64) error {
 
 		// Reset the buffers.
 		for i := range bufs {
-			bufs[i] = make([]byte, e.blockSize)
+			bufs[i] = make([]byte, e.BlockSize)
 		}
 	}
 
@@ -223,7 +215,7 @@ func (e *encoder) Join(dst io.Writer, shards []io.Reader, outSize int64) error {
 }
 
 // NewWriter wraps the Split method and returns a new io.WriteCloser.
-func (e *encoder) NewWriter(dst []io.Writer) io.WriteCloser {
+func (e *Encoder) NewWriter(dst []io.Writer) io.WriteCloser {
 	r, w := io.Pipe()
 	go func() {
 		if err := e.Split(r, dst); err != nil {
@@ -236,7 +228,7 @@ func (e *encoder) NewWriter(dst []io.Writer) io.WriteCloser {
 }
 
 // NewReader wraps the Join method and returns a new io.ReadCloser.
-func (e *encoder) NewReader(shards []io.Reader, outSize int64) io.ReadCloser {
+func (e *Encoder) NewReader(shards []io.Reader, outSize int64) io.ReadCloser {
 	r, w := io.Pipe()
 	go func() {
 		if err := e.Join(w, shards, outSize); err != nil {

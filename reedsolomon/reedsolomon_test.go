@@ -2,7 +2,6 @@ package reedsolomon_test
 
 import (
 	"bytes"
-	"crypto/rand"
 	"io"
 	"testing"
 	"time"
@@ -21,10 +20,10 @@ func TestReedSolomon(t *testing.T) {
 	parityShards := 2
 
 	totalShards := dataShards + parityShards
-	data := makeRandomData(t, blockSize*10)
+	data := makeData(blockSize * 10)
 	shards, writers := makeShardBuffer(totalShards)
 
-	rs, err := reedsolomon.New(dataShards, parityShards, blockSize)
+	rs, err := reedsolomon.NewEncoder(dataShards, parityShards, blockSize)
 	assert.Nil(err)
 
 	// Encode the data
@@ -75,10 +74,10 @@ func TestReedSolomonLarge(t *testing.T) {
 	parityShards := 3
 
 	totalShards := dataShards + parityShards
-	data := makeRandomData(t, blockSize*10)
+	data := makeData(blockSize * 10)
 	shards, writers := makeShardBuffer(totalShards)
 
-	rs, err := reedsolomon.New(dataShards, parityShards, blockSize)
+	rs, err := reedsolomon.NewEncoder(dataShards, parityShards, blockSize)
 	assert.Nil(err)
 
 	// Encode the data
@@ -105,10 +104,10 @@ func TestReaderWriter(t *testing.T) {
 	parityShards := 2
 
 	totalShards := dataShards + parityShards
-	data := makeRandomData(t, blockSize*10)
+	data := makeData(blockSize * 10)
 	shards, writers := makeShardBuffer(totalShards)
 
-	rs, err := reedsolomon.New(dataShards, parityShards, blockSize)
+	rs, err := reedsolomon.NewEncoder(dataShards, parityShards, blockSize)
 	assert.Nil(err)
 
 	// Write the data
@@ -131,29 +130,33 @@ func TestReaderWriter(t *testing.T) {
 	// Read the data
 	b, err := io.ReadAll(rsReader)
 	assert.Nil(err)
-	assert.Equal(len(data), len(b))
+	assert.Equal(data, b)
 
 	// Close the reader
 	err = rsReader.Close()
+	assert.Nil(err)
 }
 
-func makeRandomData(t *testing.T, size int) []byte {
+func makeData(size int) []byte {
 	data := make([]byte, size)
-	_, err := rand.Read(data)
-	assert.NoError(t, err)
+	for i := 0; i < len(data); i++ {
+		data[i] = byte(i / 16)
+	}
 	return data
 }
 
-func makeShardBuffer(count int) ([]writerseeker.WriterSeeker, []io.Writer) {
-	shards := make([]writerseeker.WriterSeeker, count)
+func makeShardBuffer(count int) ([]*writerseeker.WriterSeeker, []io.Writer) {
+	shards := make([]*writerseeker.WriterSeeker, count)
 	writers := make([]io.Writer, count)
 	for i := 0; i < count; i++ {
-		writers[i] = &shards[i]
+		ws := &writerseeker.WriterSeeker{}
+		shards[i] = ws
+		writers[i] = ws
 	}
 	return shards, writers
 }
 
-func getReadersFromShards(t *testing.T, blockSize int, shards []writerseeker.WriterSeeker) []io.Reader {
+func getReadersFromShards(t *testing.T, blockSize int, shards []*writerseeker.WriterSeeker) []io.Reader {
 	assert := assert.New(t)
 	readers := make([]io.Reader, len(shards))
 	for i := 0; i < len(shards); i++ {
@@ -165,7 +168,7 @@ func getReadersFromShards(t *testing.T, blockSize int, shards []writerseeker.Wri
 		// Try to read the data
 		b, err := io.ReadAll(shards[i].BytesReader())
 		assert.Nil(err)
-		assert.Equal(0, len(b)%(blockSize+32))
+		assert.Equal(0, len(b)%(blockSize+reedsolomon.BlockOverhead))
 
 		n, err = shards[i].Seek(0, io.SeekStart)
 		assert.Nil(err)
