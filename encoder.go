@@ -122,7 +122,7 @@ func (e *Encoder) Encode(data io.Reader, shards []io.WriteSeeker, key []byte, iv
 		}
 
 		// Write the header to the shard.
-		b, err := headers[i].MarshalBinary()
+		b, err := headers[i].Encode()
 		if err != nil {
 			return err
 		}

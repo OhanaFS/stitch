@@ -9,6 +9,7 @@ require (
 	github.com/klauspost/reedsolomon v1.9.16
 	github.com/orcaman/writerseeker v0.0.0-20200621085525-1d3f536ff85e
 	github.com/stretchr/testify v1.7.1
+	github.com/vmihailenco/msgpack/v5 v5.3.5
 )
 
 require (
@@ -17,6 +18,7 @@ require (
 	github.com/google/btree v1.0.1 // indirect
 	github.com/klauspost/cpuid/v2 v2.0.6 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	go.uber.org/atomic v1.9.0 // indirect
 	go.uber.org/multierr v1.8.0 // indirect
 	go.uber.org/zap v1.21.0 // indirect

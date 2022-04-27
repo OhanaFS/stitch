@@ -63,4 +63,5 @@ func TestReadSeeker(t *testing.T) {
 	testReadSeekerParam(t, 32, 4, 1, 1024, 0)
 	testReadSeekerParam(t, 48, 3, 2, 2048, 512)
 	testReadSeekerParam(t, 4096, 17, 3, 1024*1024, 1234)
+	testReadSeekerParam(t, 2047, 13, 7, 1024*1024-3, 7777)
 }

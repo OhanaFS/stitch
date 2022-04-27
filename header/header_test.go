@@ -9,24 +9,9 @@ import (
 )
 
 var (
-	testHash = []byte{
-		1, 2, 3, 4, 5, 6, 7, 8,
-		9, 10, 11, 12, 13, 14, 15, 16,
-		17, 18, 19, 20, 21, 22, 23, 24,
-		25, 26, 27, 28, 29, 30, 31, 32,
-	}
-	testKey = []byte{
-		64, 65, 66, 67, 68, 69, 70, 71,
-		72, 73, 74, 75, 76, 77, 78, 79,
-		80, 81, 82, 83, 84, 85, 86, 87,
-		88, 89, 90, 91, 92, 93, 94, 95,
-	}
-	testIv = []byte{
-		127, 128, 129, 130, 131, 132, 133, 134,
-		135, 136, 137, 138, 139, 140, 141, 142,
-		143, 144, 145, 146, 147, 148, 149, 150,
-		151, 152, 153, 154, 155, 156, 157, 158,
-	}
+	testHash = []byte("TEST HASH TEST HASH TEST HASH256")
+	testKey  = []byte("-KEYKEYKEYKEYKEYKEYKEYKEYKEYKEY-")
+	testIv   = []byte("_IVIVIVIVIVIVIVIVIVIVIVIVIVIVIV_")
 )
 
 func TestMarshalUnmarshal(t *testing.T) {
@@ -39,11 +24,12 @@ func TestMarshalUnmarshal(t *testing.T) {
 	h.FileIV = testIv
 	h.FileSize = uint64(0x123456789abcdef0)
 
-	b, err := h.MarshalBinary()
+	b, err := h.Encode()
 	assert.Nil(err)
+	t.Logf("Encoded header: %v", b)
 
 	h2 := header.NewHeader()
-	err = h2.UnmarshalBinary(b)
+	err = h2.Decode(b)
 	assert.Nil(err)
 	assert.Equal(h, h2)
 }
