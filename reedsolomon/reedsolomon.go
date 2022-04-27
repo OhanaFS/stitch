@@ -150,8 +150,6 @@ func (e *Encoder) Join(dst io.Writer, shards []io.Reader, outSize int64) error {
 				continue
 			}
 
-			fmt.Printf("Reading shard %d, block %d\n", i, currentBlock)
-
 			if _, err := shard.Read(bufs[i]); err != nil {
 				return fmt.Errorf("failed to read from shard %d, block %d: %w", i, currentBlock, err)
 			}

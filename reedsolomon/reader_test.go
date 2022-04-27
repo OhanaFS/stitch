@@ -9,15 +9,11 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestReadSeeker(t *testing.T) {
+func testReadSeekerParam(t *testing.T, blockSize, dataShards, parityShards, dataSize, seekOffset int) {
 	assert := assert.New(t)
 
-	blockSize := 256
-	dataShards := 3
-	parityShards := 1
-
 	totalShards := dataShards + parityShards
-	data := makeData(blockSize * 4)
+	data := makeData(dataSize)
 
 	shards, writers := makeShardBuffer(totalShards)
 
@@ -38,7 +34,6 @@ func TestReadSeeker(t *testing.T) {
 		readers[i] = shard.BytesReader()
 		n, err := shard.Seek(0, io.SeekEnd)
 		assert.Nil(err)
-		// assert.GreaterOrEqual(n, int64((blockSize+reedsolomon.BlockOverhead)*10/dataShards))
 		t.Logf("Shard %d: %d bytes = %d blocks\n", i, n, n/int64(blockSize+reedsolomon.BlockOverhead))
 		_, err = shard.Seek(0, io.SeekStart)
 		assert.Nil(err)
@@ -52,11 +47,20 @@ func TestReadSeeker(t *testing.T) {
 	b, err := io.ReadAll(readSeeker)
 	assert.Nil(err)
 	assert.Equal(data, b)
-	// assert.Equal(len(data), len(b))
 
-	// Seek to some offset
-	offset := int64(blockSize + 32)
-	n, err := readSeeker.Seek(offset, io.SeekStart)
+	// Seek to some seekOffset
+	n, err := readSeeker.Seek(int64(seekOffset), io.SeekStart)
 	assert.Nil(err)
-	assert.Equal(offset, n)
+	assert.Equal(int64(seekOffset), n)
+
+	// Read the data back in
+	b, err = io.ReadAll(readSeeker)
+	assert.Nil(err)
+	assert.Equal(data[seekOffset:], b)
+}
+
+func TestReadSeeker(t *testing.T) {
+	testReadSeekerParam(t, 32, 4, 1, 1024, 0)
+	testReadSeekerParam(t, 48, 3, 2, 2048, 512)
+	testReadSeekerParam(t, 4096, 17, 3, 1024*1024, 1234)
 }

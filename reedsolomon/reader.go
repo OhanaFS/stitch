@@ -2,7 +2,6 @@ package reedsolomon
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 )
 
@@ -31,25 +30,22 @@ func NewReadSeeker(encoder *Encoder, shards []io.ReadSeeker, outSize int64) io.R
 }
 
 func (r *ReadSeeker) Read(p []byte) (int, error) {
-	fmt.Printf("read: Going to read %d bytes, seeking\n", len(p))
 	if _, err := r.Seek(0, io.SeekCurrent); err != nil {
 		return 0, err
 	}
 
 	// Check if EOF
 	if r.currentOffset >= r.outSize {
-		fmt.Println("read: EOF")
 		return 0, io.EOF
 	}
 
 	// Create a buffer to read the data into
-	size := len(p) + int(r.bytesToDiscard)
+	size := len(p)
 	if r.currentOffset+int64(size) > r.outSize {
 		size = int(r.outSize - r.currentOffset)
-		fmt.Printf("read: Truncating read to %d bytes\n", size)
 	}
 	buf := new(bytes.Buffer)
-	buf.Grow(size)
+	buf.Grow(size + int(r.bytesToDiscard))
 
 	// Set up readers
 	readers := make([]io.Reader, len(r.shards))
@@ -58,7 +54,7 @@ func (r *ReadSeeker) Read(p []byte) (int, error) {
 	}
 
 	// Read the data
-	err := r.encoder.Join(buf, readers, int64(size))
+	err := r.encoder.Join(buf, readers, int64(buf.Cap()))
 	if err != nil {
 		return 0, err
 	}
@@ -66,8 +62,6 @@ func (r *ReadSeeker) Read(p []byte) (int, error) {
 	// Write the data to the output
 	buf.Next(int(r.bytesToDiscard))
 	n, err := buf.Read(p)
-
-	fmt.Printf("read: Read %d bytes (%d bytes discarded)\n", n, r.bytesToDiscard)
 
 	// Update the current offset
 	if _, err := r.Seek(int64(n), io.SeekCurrent); err != nil {
@@ -93,9 +87,7 @@ func (r *ReadSeeker) Seek(offset int64, whence int) (int64, error) {
 	shardOffset := block * realBlockSize
 
 	r.currentOffset = offset
-	r.bytesToDiscard = (offset - (block * blockSize * dataShards)) / dataShards
-
-	fmt.Printf("seek: Seek to %d: block %d, shard offset %d+%d\n", offset, block, shardOffset, r.bytesToDiscard)
+	r.bytesToDiscard = offset - (block * blockSize * dataShards)
 
 	// Seek each shard
 	for _, shard := range r.shards {
