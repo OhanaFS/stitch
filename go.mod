@@ -7,6 +7,7 @@ require (
 	github.com/hashicorp/vault v1.10.1
 	github.com/klauspost/compress v1.15.1
 	github.com/klauspost/reedsolomon v1.9.16
+	github.com/mitchellh/ioprogress v0.0.0-20180201004757-6a23b12fa88e
 	github.com/orcaman/writerseeker v0.0.0-20200621085525-1d3f536ff85e
 	github.com/stretchr/testify v1.7.1
 	github.com/vmihailenco/msgpack/v5 v5.3.5
