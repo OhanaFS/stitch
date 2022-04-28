@@ -7,44 +7,57 @@ Compress, encrypt, and split files into pieces. Then stitch them together again.
 go build ./cmd/stitch
 
 # Testing
-go test -test.v ./...
+go test ./...
 ```
 
-## Usage
+## Use the command-line interface
+
+Currently there is a basic CLI for the reed-solomon encoder:
+
+```
+go run ./cmd/stitch reedsolomon --help
+```
+
+## Usage as a library
 
 Check the Go FAQ on
 [how to use private modules](https://go.dev/doc/faq#git_https). Specifically,
 
 1. Add the following two lines to your `~/.gitconfig` file:
+
    ```
    [url "ssh://git@github.com/"]
        insteadOf = https://github.com/
    ```
+
 2. Grab the dependency:
+
    ```bash
    export GOPRIVATE=github.com/OhanaFS/stitch
    go mod download
    ```
 
-```go
-package main
+3. Import it as a library:
 
-import (
-  "github.com/OhanaFS/stitch"
-)
+   ```go
+   package main
 
-func main() {
-  enc := stitch.NewEncoder(&stitch.EncoderOptions{
-    DataShards: 5,
-    ParityShards: 3,
-    KeyThreshold: 3,
-  })
+   import (
+     "github.com/OhanaFS/stitch"
+   )
 
-  err := enc.Encode(
+   func main() {
+     enc := stitch.NewEncoder(&stitch.EncoderOptions{
+       DataShards: 5,
+       ParityShards: 3,
+       KeyThreshold: 3,
+     })
 
-  )
-  if err != nil {
-    panic(err)
-  }
-}
-```
+     err := enc.Encode(
+
+     )
+     if err != nil {
+       panic(err)
+     }
+   }
+   ```
