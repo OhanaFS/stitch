@@ -7,7 +7,15 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// Header describes the header of a shard.
+// Header describes the header of a shard. This struct only contains the actual
+// data. The full header of each shard is composed of the following:
+//
+// | Description                   | Length |
+// | ----------------------------- | ------ |
+// | magic bytes `STITCHv1`        | 8      |
+// | length of header data uint16  | 2 		  |
+// | header data                   | -      |
+// | padding to fill to 1024 bytes | -      |
 type Header struct {
 	// ShardIndex is the index of the shard.
 	ShardIndex int `msgpack:"i"`

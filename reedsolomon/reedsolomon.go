@@ -2,8 +2,9 @@ package reedsolomon
 
 import (
 	"bytes"
-	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
+	"hash/crc32"
 	"io"
 
 	rs "github.com/klauspost/reedsolomon"
@@ -12,7 +13,7 @@ import (
 const (
 	// BlockOverhead specifies the number of extra bytes required to encode a
 	// block of data.
-	BlockOverhead = sha256.Size
+	BlockOverhead = crc32.Size
 )
 
 type ErrCorruptionDetected struct {
@@ -50,7 +51,7 @@ func NewEncoder(dataShards, parityShards, blockSize int) (*Encoder, error) {
 // * The size of the original data
 // * The order of the shards
 //
-// This function also adds a sha256 hash every `blockSize` bytes.
+// This function also adds a crc32 hash every `blockSize` bytes.
 func (e *Encoder) Split(data io.Reader, dst []io.Writer) error {
 	totalShards := e.DataShards + e.ParityShards
 	if len(dst) != totalShards {
@@ -93,7 +94,8 @@ func (e *Encoder) Split(data io.Reader, dst []io.Writer) error {
 		for i, shard := range shards {
 			if dst[i] != nil {
 				// Calculate the hash of the shard.
-				hash := sha256.Sum256(shard)
+				hash := make([]byte, crc32.Size)
+				binary.LittleEndian.PutUint32(hash, crc32.ChecksumIEEE(shard))
 
 				// Write the shards and the hash to the destination.
 				if _, err := dst[i].Write(shard); err != nil {
@@ -126,7 +128,7 @@ func (e *Encoder) Join(dst io.Writer, shards []io.Reader, outSize int64) error {
 
 	hashes := make([][]byte, len(shards))
 	for i := range hashes {
-		hashes[i] = make([]byte, sha256.Size)
+		hashes[i] = make([]byte, crc32.Size)
 	}
 
 	// Initialize the Reed-Solomon decoder.
@@ -159,7 +161,8 @@ func (e *Encoder) Join(dst io.Writer, shards []io.Reader, outSize int64) error {
 			}
 
 			// Verify the hash.
-			hash := sha256.Sum256(bufs[i])
+			hash := make([]byte, crc32.Size)
+			binary.LittleEndian.PutUint32(hash, crc32.ChecksumIEEE(bufs[i]))
 			if !bytes.Equal(hashes[i], hash[:]) {
 				// If hashes don't match, truncate the shard so that `enc.Reconstruct`
 				// will regenerate it.
