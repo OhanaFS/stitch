@@ -132,7 +132,7 @@ func (e *Encoder) Encode(data io.Reader, shards []io.WriteSeeker, key []byte, iv
 	}
 
 	// Prepare the Reed-Solomon encoder.
-	encRS, err := reedsolomon.NewEncoder(
+	_, err = reedsolomon.NewEncoder(
 		int(e.opts.DataShards), int(e.opts.ParityShards), rsBlockSize,
 	)
 	if err != nil {
