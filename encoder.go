@@ -72,8 +72,7 @@ func (e *Encoder) Encode(data io.Reader, shards []io.WriteSeeker, key []byte, iv
 
 	// Prepare a 256-bit AES key to encrypt the data.
 	fileKey := make([]byte, 32)
-	_, err := rand.Read(fileKey)
-	if err != nil {
+	if _, err := rand.Read(fileKey); err != nil {
 		return err
 	}
 

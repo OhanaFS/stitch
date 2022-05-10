@@ -1,10 +1,10 @@
 package header
 
 import (
+	"crypto/rand"
 	"encoding/binary"
 	"errors"
 
-	"github.com/OhanaFS/stitch/crypto"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -48,8 +48,8 @@ func NewHeader() *Header {
 
 func (h *Header) Encode() ([]byte, error) {
 	// Allocate a buffer for the header.
-	buf, err := crypto.RandomBytes(HeaderSize)
-	if err != nil {
+	buf := make([]byte, HeaderSize)
+	if _, err := rand.Read(buf); err != nil {
 		return nil, err
 	}
 
