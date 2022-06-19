@@ -16,7 +16,7 @@ func TestAES(t *testing.T) {
 	buf := &writerseeker.WriterSeeker{}
 
 	// Test writing small data
-	w, err := aes.NewWriter(buf, key, 64)
+	w, err := aes.NewWriter(buf, key, 32)
 	assert.NoError(err)
 
 	datatext := "hello, world"
@@ -27,7 +27,7 @@ func TestAES(t *testing.T) {
 	assert.Equal(0, buf.BytesReader().Len())
 	w.Close()
 	// Should be flushed
-	assert.Equal(len(datatext)+overhead, buf.BytesReader().Len())
+	assert.Equal(32+overhead, buf.BytesReader().Len())
 
 	// Test writing data longer than chunk size
 	buf = &writerseeker.WriterSeeker{}
@@ -42,7 +42,7 @@ func TestAES(t *testing.T) {
 	assert.Equal(2*(8+overhead), buf.BytesReader().Len())
 	w.Close()
 	// Should be flushed
-	assert.Equal(2*(8+overhead)+(4+overhead), buf.BytesReader().Len())
+	assert.Equal(3*(8+overhead), buf.BytesReader().Len())
 
 	// Test decryption
 	reader := buf.BytesReader()

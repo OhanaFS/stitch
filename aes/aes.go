@@ -118,6 +118,12 @@ func (w *AESWriter) Write(p []byte) (int, error) {
 // the writer.
 func (w *AESWriter) Close() error {
 	chunk := w.buffer.Bytes()
+
+	// Pad the chunk up to the chunk size
+	if len(chunk) < w.chunkSize {
+		chunk = append(chunk, make([]byte, w.chunkSize-len(chunk))...)
+	}
+
 	index := FromOffset(w.chunkSize, w.gcm.Overhead(), w.written)
 	nonce := make([]byte, w.gcm.NonceSize())
 	binary.BigEndian.PutUint64(nonce, uint64(index))
@@ -212,12 +218,6 @@ func (r *AESReader) Read(p []byte) (int, error) {
 	blocks := (len(p) / r.chunkSize) + 1
 	b := make([]byte, blocks*(r.chunkSize+r.gcm.Overhead()))
 
-	// Read the data from the underlying reader
-	n, err := r.ds.Read(b)
-	if err != nil {
-		return 0, err
-	}
-
 	// Get the index of the chunk
 	currentOffset, err := r.ds.Seek(0, io.SeekCurrent)
 	if err != nil {
@@ -225,16 +225,24 @@ func (r *AESReader) Read(p []byte) (int, error) {
 	}
 	index := FromOffset(r.chunkSize, r.gcm.Overhead(), uint64(currentOffset))
 
+	// Read the data from the underlying reader
+	n, err := r.ds.Read(b)
+	if err != nil {
+		return 0, err
+	}
+
 	// Decrypt each chunk
 	buf := bytes.NewBuffer(b)
 	written := 0
 	for i := 0; i < n; i += r.chunkSize + r.gcm.Overhead() {
+
 		// Get the nonce
 		nonce := make([]byte, r.gcm.NonceSize())
 		binary.BigEndian.PutUint64(nonce, uint64(index))
 
 		// Decrypt the chunk
 		ciphertext := buf.Next(r.chunkSize + r.gcm.Overhead())
+
 		plaintext, err := r.gcm.Open(nil, nonce, ciphertext, nil)
 		if err != nil {
 			return 0, err
