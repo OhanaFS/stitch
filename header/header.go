@@ -1,6 +1,7 @@
 package header
 
 import (
+	"crypto/rand"
 	"encoding/binary"
 	"errors"
 
@@ -25,8 +26,6 @@ type Header struct {
 	FileHash []byte `msgpack:"h"`
 	// FileKey is one shard of the AES key used to encrypt the file plaintext.
 	FileKey []byte `msgpack:"k"`
-	// FileIV is the AES initialization vector used to encrypt the file plaintext.
-	FileIV []byte `msgpack:"n"`
 	// FileSize is the size of the file plaintext.
 	FileSize uint64 `msgpack:"s"`
 	// RSBlockSize is the size of the Reed-Solomon block.
@@ -50,6 +49,9 @@ func NewHeader() *Header {
 func (h *Header) Encode() ([]byte, error) {
 	// Allocate a buffer for the header.
 	buf := make([]byte, HeaderSize)
+	if _, err := rand.Read(buf); err != nil {
+		return nil, err
+	}
 
 	// Write the magic bytes.
 	copy(buf[:8], MagicBytes)

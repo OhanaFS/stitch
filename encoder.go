@@ -4,9 +4,11 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha256"
 	"errors"
 	"io"
 
+	aesgcm "github.com/OhanaFS/stitch/aes"
 	"github.com/OhanaFS/stitch/header"
 	"github.com/OhanaFS/stitch/reedsolomon"
 	seekable "github.com/SaveTheRbtz/zstd-seekable-format-go"
@@ -74,12 +76,6 @@ func (e *Encoder) Encode(data io.Reader, shards []io.WriteSeeker, key []byte, iv
 		return err
 	}
 
-	// Prepare a random IV to use for the AES-GCM cipher.
-	fileIV := make([]byte, 12)
-	if _, err := rand.Read(fileIV); err != nil {
-		return err
-	}
-
 	// Encrypt the file key with the user-supplied key and iv.
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -93,11 +89,9 @@ func (e *Encoder) Encode(data io.Reader, shards []io.WriteSeeker, key []byte, iv
 	gcm.Seal(fileKeyCiphertext[:0], iv, fileKey, nil)
 
 	// Split the key and IV into shards.
-	fileKeySplit, err := shamir.Split(fileKeyCiphertext, totalShards, int(e.opts.KeyThreshold))
-	if err != nil {
-		return err
-	}
-	fileIVSplit, err := shamir.Split(fileIV, totalShards, int(e.opts.KeyThreshold))
+	fileKeySplit, err := shamir.Split(
+		fileKeyCiphertext, totalShards, int(e.opts.KeyThreshold),
+	)
 	if err != nil {
 		return err
 	}
@@ -110,7 +104,6 @@ func (e *Encoder) Encode(data io.Reader, shards []io.WriteSeeker, key []byte, iv
 			ShardIndex:  i,
 			ShardCount:  totalShards,
 			FileKey:     fileKeySplit[i],
-			FileIV:      fileIVSplit[i],
 			FileHash:    make([]byte, 32),
 			FileSize:    0,
 			RSBlockSize: rsBlockSize,
@@ -132,9 +125,22 @@ func (e *Encoder) Encode(data io.Reader, shards []io.WriteSeeker, key []byte, iv
 	}
 
 	// Prepare the Reed-Solomon encoder.
-	_, err = reedsolomon.NewEncoder(
+	encRS, err := reedsolomon.NewEncoder(
 		int(e.opts.DataShards), int(e.opts.ParityShards), rsBlockSize,
 	)
+	if err != nil {
+		return err
+	}
+
+	// Prepare the Reed-Solomon writer.
+	wShards := make([]io.Writer, totalShards)
+	for i, shard := range shards {
+		wShards[i] = shard
+	}
+	wRS := encRS.NewWriter(wShards)
+
+	// Prepare the AES writer.
+	wAES, err := aesgcm.NewWriter(wRS, fileKey, rsBlockSize)
 	if err != nil {
 		return err
 	}
@@ -144,9 +150,58 @@ func (e *Encoder) Encode(data io.Reader, shards []io.WriteSeeker, key []byte, iv
 	if err != nil {
 		return err
 	}
-	_, err = seekable.NewWriter(io.Discard, encZstd)
+	wZstd, err := seekable.NewWriter(wAES, encZstd)
 	if err != nil {
 		return err
+	}
+
+	// Start encoding
+	chunk := make([]byte, rsBlockSize)
+	hash := sha256.New()
+	fileSize := uint64(0)
+
+	for {
+		// Read a block of data
+		n, err := data.Read(chunk)
+		if err != nil {
+			return err
+		}
+		fileSize += uint64(n)
+
+		// Encode
+		if _, err := wZstd.Write(chunk); err != nil {
+			return err
+		}
+
+		// Update the hash
+		if _, err := hash.Write(chunk); err != nil {
+			return err
+		}
+
+		if n < rsBlockSize {
+			break
+		}
+	}
+
+	// Finalize the header
+	digest := hash.Sum(nil)
+	for i := 0; i < totalShards; i++ {
+		headers[i].FileHash = digest
+		headers[i].FileSize = fileSize
+
+		// Seek the writers to the starting positions
+		if _, err := shards[i].Seek(headerOffsets[i], io.SeekStart); err != nil {
+			return err
+		}
+
+		// Write the header to the shard.
+		b, err := headers[i].Encode()
+		if err != nil {
+			return err
+		}
+		if _, err := shards[i].Write(b); err != nil {
+			return err
+		}
 	}
 
 	return nil

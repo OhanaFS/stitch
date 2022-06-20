@@ -21,7 +21,6 @@ func TestMarshalUnmarshal(t *testing.T) {
 	h.ShardIndex = 1
 	h.FileHash = testHash
 	h.FileKey = testKey
-	h.FileIV = testIv
 	h.FileSize = uint64(0x123456789abcdef0)
 
 	b, err := h.Encode()
