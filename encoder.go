@@ -8,12 +8,12 @@ import (
 	"errors"
 	"io"
 
+	aesgcm "github.com/OhanaFS/stitch/aes"
 	"github.com/OhanaFS/stitch/header"
 	"github.com/OhanaFS/stitch/reedsolomon"
 	seekable "github.com/SaveTheRbtz/zstd-seekable-format-go"
 	"github.com/hashicorp/vault/shamir"
 	"github.com/klauspost/compress/zstd"
-	"github.com/nicholastoddsmith/aesrw"
 )
 
 const (
@@ -140,7 +140,7 @@ func (e *Encoder) Encode(data io.Reader, shards []io.WriteSeeker, key []byte, iv
 	wRS := encRS.NewWriter(wShards)
 
 	// Prepare the AES writer.
-	wAES, err := aesrw.NewWriter(wRS, fileKey)
+	wAES, err := aesgcm.NewWriter(wRS, fileKey, rsBlockSize)
 	if err != nil {
 		return err
 	}
