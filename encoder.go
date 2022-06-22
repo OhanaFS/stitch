@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"io"
+	"os"
 
 	aesgcm "github.com/OhanaFS/stitch/aes"
 	"github.com/OhanaFS/stitch/header"
@@ -61,7 +62,7 @@ func NewEncoder(opts *EncoderOptions) *Encoder {
 	return &Encoder{opts}
 }
 
-func (e *Encoder) Encode(data io.Reader, shards []io.WriteSeeker, key []byte, iv []byte) error {
+func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte, iv []byte) error {
 	totalShards := int(e.opts.DataShards + e.opts.ParityShards)
 
 	// Check if the number of output writers matches the number of shards in the
@@ -98,7 +99,6 @@ func (e *Encoder) Encode(data io.Reader, shards []io.WriteSeeker, key []byte, iv
 
 	// Prepare headers for each shard.
 	headers := make([]header.Header, totalShards)
-	headerOffsets := make([]int64, totalShards)
 	for i := 0; i < totalShards; i++ {
 		headers[i] = header.Header{
 			ShardIndex:  i,
@@ -107,11 +107,7 @@ func (e *Encoder) Encode(data io.Reader, shards []io.WriteSeeker, key []byte, iv
 			FileHash:    make([]byte, 32),
 			FileSize:    0,
 			RSBlockSize: rsBlockSize,
-		}
-
-		// Get the current position of the writer.
-		if headerOffsets[i], err = shards[i].Seek(0, io.SeekCurrent); err != nil {
-			return err
+			IsComplete:  false,
 		}
 
 		// Write the header to the shard.
@@ -188,13 +184,9 @@ func (e *Encoder) Encode(data io.Reader, shards []io.WriteSeeker, key []byte, iv
 	for i := 0; i < totalShards; i++ {
 		headers[i].FileHash = digest
 		headers[i].FileSize = fileSize
+		headers[i].IsComplete = true
 
-		// Seek the writers to the starting positions
-		if _, err := shards[i].Seek(headerOffsets[i], io.SeekStart); err != nil {
-			return err
-		}
-
-		// Write the header to the shard.
+		// Write the updated header to the end of the shard.
 		b, err := headers[i].Encode()
 		if err != nil {
 			return err
@@ -202,6 +194,68 @@ func (e *Encoder) Encode(data io.Reader, shards []io.WriteSeeker, key []byte, iv
 		if _, err := shards[i].Write(b); err != nil {
 			return err
 		}
+	}
+
+	return nil
+}
+
+// FinalizeHeader rewrites the shard header with the one located at the end of
+// the shard.
+func (e *Encoder) FinalizeHeader(shard *os.File) error {
+	// Seek to the start of the shard.
+	if _, err := shard.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+
+	// Try to read the header at the start
+	headerBuf := make([]byte, header.HeaderSize)
+	if _, err := shard.Read(headerBuf); err != nil {
+		return err
+	}
+
+	// Parse the header at the start
+	hdr := header.NewHeader()
+	if err := hdr.Decode(headerBuf); err != nil {
+		return err
+	}
+
+	// Skip if the header is already complete
+	if hdr.IsComplete {
+		return nil
+	}
+
+	// Seek to the end of the shard
+	hdrOffset, err := shard.Seek(-int64(header.HeaderSize), io.SeekEnd)
+	if err != nil {
+		return err
+	}
+
+	// Read the header at the end
+	if _, err := shard.Read(headerBuf); err != nil {
+		return err
+	}
+
+	// Parse the header at the end
+	if err := hdr.Decode(headerBuf); err != nil {
+		return err
+	}
+
+	// Make sure the header is complete
+	if !hdr.IsComplete {
+		return header.ErrHeaderNotComplete
+	}
+
+	// Rewrite the header at the start
+	if _, err := shard.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	if _, err := shard.Write(headerBuf); err != nil {
+		return err
+	}
+
+	// Truncate the ending header
+	if err := shard.Truncate(hdrOffset); err != nil {
+		return err
 	}
 
 	return nil

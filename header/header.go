@@ -30,6 +30,8 @@ type Header struct {
 	FileSize uint64 `msgpack:"s"`
 	// RSBlockSize is the size of the Reed-Solomon block.
 	RSBlockSize int `msgpack:"b"`
+	// IsComplete marks whether the header is complete.
+	IsComplete bool `msgpack:"o"`
 }
 
 // HeaderSize is the fixed size allocated for the header.
@@ -40,6 +42,7 @@ var (
 
 	ErrInvalidHeaderSize = errors.New("invalid header size")
 	ErrUnrecognizedMagic = errors.New("unrecognized magic bytes")
+	ErrHeaderNotComplete = errors.New("header not complete")
 )
 
 func NewHeader() *Header {
