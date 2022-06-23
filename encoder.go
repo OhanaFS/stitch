@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 
@@ -20,11 +21,14 @@ import (
 const (
 	// rsBlockSize is the size of a Reed-Solomon block.
 	rsBlockSize = 4096
+	// aesBlockSize is the size of a chunk of data that is encrypted with AES-GCM.
+	aesBlockSize = 4096
 )
 
 var (
 	ErrShardCountMismatch = errors.New("shard count mismatch")
 	ErrNonSeekableWriter  = errors.New("shards must support seeking")
+	ErrNotEnoughKeyShards = errors.New("not shards to reconstruct the file key")
 )
 
 type EncoderOptions struct {
@@ -86,10 +90,9 @@ func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte, iv []by
 	if err != nil {
 		return err
 	}
-	fileKeyCiphertext := make([]byte, gcm.Overhead()+len(fileKey))
-	gcm.Seal(fileKeyCiphertext[:0], iv, fileKey, nil)
+	fileKeyCiphertext := gcm.Seal(nil, iv, fileKey, nil)
 
-	// Split the key and IV into shards.
+	// Split the key into shards.
 	fileKeySplit, err := shamir.Split(
 		fileKeyCiphertext, totalShards, int(e.opts.KeyThreshold),
 	)
@@ -101,13 +104,16 @@ func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte, iv []by
 	headers := make([]header.Header, totalShards)
 	for i := 0; i < totalShards; i++ {
 		headers[i] = header.Header{
-			ShardIndex:  i,
-			ShardCount:  totalShards,
-			FileKey:     fileKeySplit[i],
-			FileHash:    make([]byte, 32),
-			FileSize:    0,
-			RSBlockSize: rsBlockSize,
-			IsComplete:  false,
+			ShardIndex:     i,
+			ShardCount:     totalShards,
+			FileKey:        fileKeySplit[i],
+			FileHash:       make([]byte, 32),
+			FileSize:       0,
+			EncryptedSize:  0,
+			CompressedSize: 0,
+			RSBlockSize:    rsBlockSize,
+			AESBlockSize:   aesBlockSize,
+			IsComplete:     false,
 		}
 
 		// Write the header to the shard.
@@ -136,7 +142,7 @@ func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte, iv []by
 	wRS := encRS.NewWriter(wShards)
 
 	// Prepare the AES writer.
-	wAES, err := aesgcm.NewWriter(wRS, fileKey, rsBlockSize)
+	wAES, err := aesgcm.NewWriter(wRS, fileKey, aesBlockSize)
 	if err != nil {
 		return err
 	}
@@ -179,11 +185,28 @@ func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte, iv []by
 		}
 	}
 
-	// Finalize the header
+	// Close the writers
+	if err := wZstd.Close(); err != nil {
+		return err
+	}
+	if err := encZstd.Close(); err != nil {
+		return err
+	}
+	if err := wAES.Close(); err != nil {
+		return err
+	}
+	if err := wRS.Close(); err != nil {
+		return err
+	}
+
+	// Write the complete header to the end of the file.
 	digest := hash.Sum(nil)
 	for i := 0; i < totalShards; i++ {
 		headers[i].FileHash = digest
 		headers[i].FileSize = fileSize
+		// TODO: make this less hacky
+		headers[i].EncryptedSize = wAES.(*aesgcm.AESWriter).GetWritten()
+		headers[i].CompressedSize = wAES.(*aesgcm.AESWriter).GetRead()
 		headers[i].IsComplete = true
 
 		// Write the updated header to the end of the shard.
@@ -201,22 +224,22 @@ func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte, iv []by
 
 // FinalizeHeader rewrites the shard header with the one located at the end of
 // the shard.
-func (e *Encoder) FinalizeHeader(shard *os.File) error {
+func (e *Encoder) FinalizeHeader(shard io.ReadWriteSeeker) error {
 	// Seek to the start of the shard.
 	if _, err := shard.Seek(0, io.SeekStart); err != nil {
-		return err
+		return fmt.Errorf("failed to seek to start of shard: %v", err)
 	}
 
 	// Try to read the header at the start
 	headerBuf := make([]byte, header.HeaderSize)
 	if _, err := shard.Read(headerBuf); err != nil {
-		return err
+		return fmt.Errorf("failed to read header at start of shard: %v", err)
 	}
 
 	// Parse the header at the start
 	hdr := header.NewHeader()
 	if err := hdr.Decode(headerBuf); err != nil {
-		return err
+		return fmt.Errorf("failed to decode header at start of shard: %v", err)
 	}
 
 	// Skip if the header is already complete
@@ -227,17 +250,17 @@ func (e *Encoder) FinalizeHeader(shard *os.File) error {
 	// Seek to the end of the shard
 	hdrOffset, err := shard.Seek(-int64(header.HeaderSize), io.SeekEnd)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to seek to end of shard: %v", err)
 	}
 
 	// Read the header at the end
 	if _, err := shard.Read(headerBuf); err != nil {
-		return err
+		return fmt.Errorf("failed to read header at end of shard: %v", err)
 	}
 
 	// Parse the header at the end
 	if err := hdr.Decode(headerBuf); err != nil {
-		return err
+		return fmt.Errorf("failed to decode header at end of shard: %v", err)
 	}
 
 	// Make sure the header is complete
@@ -247,15 +270,17 @@ func (e *Encoder) FinalizeHeader(shard *os.File) error {
 
 	// Rewrite the header at the start
 	if _, err := shard.Seek(0, io.SeekStart); err != nil {
-		return err
+		return fmt.Errorf("failed to seek to start of shard: %v", err)
 	}
 	if _, err := shard.Write(headerBuf); err != nil {
-		return err
+		return fmt.Errorf("failed to write header at start of shard: %v", err)
 	}
 
-	// Truncate the ending header
-	if err := shard.Truncate(hdrOffset); err != nil {
-		return err
+	// Try to truncate the ending header
+	if file, ok := shard.(*os.File); ok {
+		if err := file.Truncate(hdrOffset); err != nil {
+			return fmt.Errorf("failed to truncate shard: %v", err)
+		}
 	}
 
 	return nil

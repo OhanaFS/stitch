@@ -1,10 +1,11 @@
 package aes_test
 
 import (
+	"io"
 	"testing"
 
 	"github.com/OhanaFS/stitch/aes"
-	"github.com/orcaman/writerseeker"
+	"github.com/OhanaFS/stitch/util"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -13,7 +14,7 @@ func TestAES(t *testing.T) {
 
 	overhead := 16
 	key := []byte("11111111aaaaaaaa")
-	buf := &writerseeker.WriterSeeker{}
+	buf := util.NewMembuf()
 
 	// Test writing small data
 	w, err := aes.NewWriter(buf, key, 32)
@@ -24,13 +25,13 @@ func TestAES(t *testing.T) {
 	assert.NoError(err)
 	assert.Equal(12, n)
 	// Should be buffered
-	assert.Equal(0, buf.BytesReader().Len())
+	assert.Equal(0, buf.Len())
 	w.Close()
 	// Should be flushed
-	assert.Equal(32+overhead, buf.BytesReader().Len())
+	assert.Equal(32+overhead, buf.Len())
 
 	// Test writing data longer than chunk size
-	buf = &writerseeker.WriterSeeker{}
+	buf = util.NewMembuf()
 	w, err = aes.NewWriter(buf, key, 8)
 	assert.NoError(err)
 
@@ -39,14 +40,14 @@ func TestAES(t *testing.T) {
 	assert.NoError(err)
 	assert.Equal(20, n)
 	// Should be partially written
-	assert.Equal(2*(8+overhead), buf.BytesReader().Len())
+	assert.Equal(2*(8+overhead), buf.Len())
 	w.Close()
 	// Should be flushed
-	assert.Equal(3*(8+overhead), buf.BytesReader().Len())
+	assert.Equal(3*(8+overhead), buf.Len())
 
 	// Test decryption
-	reader := buf.BytesReader()
-	r, err := aes.NewReader(reader, key, 8)
+	buf.Seek(0, io.SeekStart)
+	r, err := aes.NewReader(buf, key, 8, uint64(len(datatext)))
 	assert.NoError(err)
 
 	res := make([]byte, 20)

@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"log"
 )
 
 var (
@@ -19,6 +20,7 @@ type AESReader struct {
 	block     cipher.Block
 	gcm       cipher.AEAD
 	chunkSize int
+	fileSize  uint64
 
 	// bytesToDiscard is the number of bytes to discard after reading a chunk, to
 	// ensure that the reader is at the correct position.
@@ -37,6 +39,7 @@ type AESWriter struct {
 	chunkSize int
 
 	buffer  bytes.Buffer
+	read    uint64
 	written uint64
 }
 
@@ -75,7 +78,11 @@ func NewWriter(ds io.Writer, key []byte, chunkSize int) (io.WriteCloser, error) 
 // Write buffers p and encrypts the buffer in chunks of chunkSize.
 func (w *AESWriter) Write(p []byte) (int, error) {
 	// Append p to the buffer
-	w.buffer.Write(p)
+	n, err := w.buffer.Write(p)
+	w.read += uint64(n)
+	if err != nil {
+		return n, err
+	}
 
 	// Process the buffer until there's not enough data to process
 	chunk := make([]byte, w.chunkSize)
@@ -114,6 +121,16 @@ func (w *AESWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// GetWritten returns the number of ciphertext bytes written to the underlying writer.
+func (w *AESWriter) GetWritten() uint64 {
+	return w.written
+}
+
+// GetRead returns the number of plaintext bytes read.
+func (w *AESWriter) GetRead() uint64 {
+	return w.read
+}
+
 // Close finalizes the writes and flushes any remaining buffered data onto
 // the writer.
 func (w *AESWriter) Close() error {
@@ -140,7 +157,7 @@ func (w *AESWriter) Close() error {
 }
 
 // NewReader creates a new AESReader
-func NewReader(ds io.ReadSeeker, key []byte, chunkSize int) (io.ReadSeeker, error) {
+func NewReader(ds io.ReadSeeker, key []byte, chunkSize int, fileSize uint64) (io.ReadSeeker, error) {
 	if len(key) != 16 && len(key) != 24 && len(key) != 32 {
 		return nil, ErrInvalidKeyLength
 	}
@@ -155,15 +172,15 @@ func NewReader(ds io.ReadSeeker, key []byte, chunkSize int) (io.ReadSeeker, erro
 		return nil, err
 	}
 
-	return &AESReader{ds: ds, block: block, gcm: gcm, chunkSize: chunkSize}, nil
+	return &AESReader{ds: ds, block: block, gcm: gcm, chunkSize: chunkSize, fileSize: fileSize}, nil
 }
 
 func (r *AESReader) Seek(offset int64, whence int) (int64, error) {
 	// Calculate the offset from the start
-	var startOffset uint64
+	var startOffset int64
 	switch whence {
 	case io.SeekStart:
-		startOffset = uint64(offset)
+		startOffset = offset
 		break
 	case io.SeekCurrent:
 		// Get the current position of the underlying reader
@@ -172,28 +189,11 @@ func (r *AESReader) Seek(offset int64, whence int) (int64, error) {
 			return 0, err
 		}
 
-		startOffset = uint64(pos + offset)
+		startOffset = pos + offset
 		break
 	case io.SeekEnd:
-		// Disable seeking from the end
-		return 0, errors.New("Seeking from the end is not supported")
-
-		/*
-			// Get the size of the underlying reader
-			size, err := r.ds.Seek(0, io.SeekEnd)
-			if err != nil {
-				return 0, err
-			}
-
-			// Calculate the size of the plaintext
-			// TODO: Assuming the plaintext is a nice multiple of the chunk size is not
-			//       correct.
-			chunks := size / int64(r.chunkSize+r.gcm.Overhead())
-			plaintextSize := chunks * int64(r.chunkSize)
-
-			startOffset = uint64(plaintextSize + offset)
-			break
-		*/
+		startOffset = int64(r.fileSize) + offset
+		break
 	default:
 		return 0, errors.New("Invalid whence")
 	}
@@ -201,16 +201,21 @@ func (r *AESReader) Seek(offset int64, whence int) (int64, error) {
 	// Calculate the closest start block and its offset
 	chunkSize := r.chunkSize
 	overhead := r.gcm.Overhead()
-	block := FromOffset(chunkSize, 0, startOffset)
-	ciphertextOffset := GetOffset(chunkSize, overhead, block)
-	r.bytesToDiscard = startOffset - uint64(block*chunkSize)
+	block := FromOffset(chunkSize, 0, uint64(startOffset))
+	ciphertextOffset := int64(GetOffset(chunkSize, overhead, block))
+	r.bytesToDiscard = uint64(startOffset - int64(block*chunkSize))
+
+	log.Printf(
+		"[aes] Seeking to %d, block %d, ciphertext offset %d, bytes to discard %d",
+		startOffset, block, ciphertextOffset, r.bytesToDiscard,
+	)
 
 	// Seek to the correct offset
-	if _, err := r.ds.Seek(int64(ciphertextOffset), io.SeekStart); err != nil {
+	if _, err := r.ds.Seek(ciphertextOffset, io.SeekStart); err != nil {
 		return 0, err
 	}
 
-	return int64(startOffset), nil
+	return startOffset, nil
 }
 
 func (r *AESReader) Read(p []byte) (int, error) {

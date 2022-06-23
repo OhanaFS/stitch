@@ -106,6 +106,37 @@ func RunPipelineCmd() int {
 				log.Fatalln("Failed to finalize shard header:", err)
 			}
 		}
+	} else {
+		// Open output file for writing
+		fmt.Printf("Opening file %s for writing\n", fileName)
+		outputFile, err := os.Create(fileName)
+		if err != nil {
+			log.Fatalln("Failed to open output file:", err)
+		}
+		defer outputFile.Close()
+
+		// Open the input files
+		shards := make([]io.ReadSeeker, totalShards)
+		for i := 0; i < totalShards; i++ {
+			shardFile, err := os.Open(shardNames[i])
+			if err != nil {
+				log.Fatalln("Failed to open shard:", err)
+			}
+			defer shardFile.Close()
+			shards[i] = shardFile
+		}
+
+		// Decode the file
+		log.Println("Decoding file...")
+		reader, err := encoder.NewReadSeeker(shards, key, iv)
+		if err != nil {
+			log.Fatalln("Failed to create reader:", err)
+		}
+		n, err := io.Copy(outputFile, reader)
+		if err != nil {
+			log.Fatalln("Failed to decode file:", err)
+		}
+		log.Printf("Decoded %d bytes\n", n)
 	}
 
 	log.Println("Done.")
