@@ -10,6 +10,7 @@ import (
 	aesgcm "github.com/OhanaFS/stitch/aes"
 	"github.com/OhanaFS/stitch/header"
 	"github.com/OhanaFS/stitch/reedsolomon"
+	"github.com/OhanaFS/stitch/util"
 	seekable "github.com/SaveTheRbtz/zstd-seekable-format-go"
 	"github.com/hashicorp/vault/shamir"
 	"github.com/klauspost/compress/zstd"
@@ -92,6 +93,12 @@ func (e *Encoder) NewReadSeeker(shards []io.ReadSeeker, key []byte, iv []byte) (
 		}
 	}
 
+	// Prepare offset reader for shards
+	shardData := make([]io.ReadSeeker, totalShards)
+	for i, shard := range shards {
+		shardData[i] = util.NewOffsetReader(shard, header.HeaderSize)
+	}
+
 	// Prepare the Reed-Solomon decoder.
 	encRS, err := reedsolomon.NewEncoder(
 		int(e.opts.DataShards), int(e.opts.ParityShards), hdr.RSBlockSize,
@@ -99,7 +106,7 @@ func (e *Encoder) NewReadSeeker(shards []io.ReadSeeker, key []byte, iv []byte) (
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Reed-Solomon encoder: %v", err)
 	}
-	rRS := reedsolomon.NewReadSeeker(encRS, shards, int64(hdr.EncryptedSize))
+	rRS := reedsolomon.NewReadSeeker(encRS, shardData, int64(hdr.EncryptedSize))
 
 	// Prepare the AES cipher to decrypt the data.
 	rAES, err := aesgcm.NewReader(rRS, fileKey, hdr.AESBlockSize, hdr.CompressedSize)
@@ -117,6 +124,9 @@ func (e *Encoder) NewReadSeeker(shards []io.ReadSeeker, key []byte, iv []byte) (
 		return nil, fmt.Errorf("failed to create zstd reader: %v", err)
 	}
 
-	// Return the zstd decoder.
-	return rZstd, nil
+	// Limit the reader to the size of the plaintext.
+	rLim := util.NewLimitReader(rZstd, int64(hdr.FileSize))
+
+	// Return the reader.
+	return rLim, nil
 }

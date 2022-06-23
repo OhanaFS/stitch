@@ -225,12 +225,14 @@ func (r *AESReader) Read(p []byte) (int, error) {
 
 	// Get the index of the chunk
 	currentOffset, err := r.ds.Seek(0, io.SeekCurrent)
+	log.Printf("[aes] Current offset: %d", currentOffset)
 	if err != nil {
 		return 0, err
 	}
 	index := FromOffset(r.chunkSize, r.gcm.Overhead(), uint64(currentOffset))
 
 	// Read the data from the underlying reader
+	log.Printf("[aes] Reading %d blocks (%d bytes)", blocks, len(b))
 	n, err := r.ds.Read(b)
 	if err != nil {
 		return 0, err

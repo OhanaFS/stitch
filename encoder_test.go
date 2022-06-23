@@ -14,7 +14,8 @@ func TestEncodeDecode(t *testing.T) {
 	assert := assert.New(t)
 
 	// Prepare the data to be encoded.
-	input := bytes.NewBuffer([]byte("hello, world"))
+	input := "hello, world!"
+	inputBuffer := bytes.NewBuffer([]byte(input))
 	shards := make([]*util.Membuf, 3)
 	shardWriters := make([]io.Writer, 3)
 	shardReaders := make([]io.ReadSeeker, 3)
@@ -35,7 +36,7 @@ func TestEncodeDecode(t *testing.T) {
 	iv := []byte("1234567890ab")
 
 	// Encode the data.
-	assert.NoError(encoder.Encode(input, shardWriters, key, iv))
+	assert.NoError(encoder.Encode(inputBuffer, shardWriters, key, iv))
 
 	// Finalize the file headers
 	for _, shard := range shards {
@@ -52,5 +53,5 @@ func TestEncodeDecode(t *testing.T) {
 	assert.NoError(err)
 
 	// Verify the data.
-	assert.Equal(input.String(), output.String())
+	assert.Equal(input, output.String())
 }
