@@ -150,18 +150,20 @@ func (w *Writer) Write(p []byte) (n int, err error) {
 	}
 
 	// Process the buffer until there's not enough data to process
-	chunk := make([]byte, w.enc.BlockSize)
+	readSize := w.enc.BlockSize * w.enc.DataShards
+	chunk := make([]byte, readSize)
 	for {
-		if w.buffer.Len() < w.enc.BlockSize {
+		if w.buffer.Len() < readSize {
 			break
 		}
 
-		// Read up to the block size.
+		// Read a chunk
 		n, err = w.buffer.Read(chunk)
 		if err != nil {
 			log.Printf("2 returning n = %d", n)
 			return n, err
 		}
+		log.Printf("[rs:w] processing %d bytes", n)
 
 		// Split the block into shards.
 		shards, err := w.enc.encoder.Split(chunk[:n])
@@ -189,6 +191,7 @@ func (w *Writer) Write(p []byte) (n int, err error) {
 					return n, err
 				}
 				w.written += uint64(n)
+				log.Printf("[rs:w] wrote %d data bytes", n)
 
 				n, err = w.dst[i].Write(hash[:])
 				if err != nil {
@@ -196,14 +199,17 @@ func (w *Writer) Write(p []byte) (n int, err error) {
 					return n, err
 				}
 				w.written += uint64(n)
+				log.Printf("[rs:w] wrote %d hash bytes", n)
 			}
 		}
 	}
 
 	// Clean up the buffer.
+	log.Printf("[rs:w] no more data to process, cleaning up buffer")
 	b := bytes.Buffer{}
 	b.Write(w.buffer.Bytes())
 	w.buffer = b
+	log.Printf("[rs:w] %d bytes left in buffer", w.buffer.Len())
 
 	log.Printf("done, returning n = %d", len(p))
 	return len(p), nil
@@ -211,10 +217,18 @@ func (w *Writer) Write(p []byte) (n int, err error) {
 
 // Close implements io.WriteCloser
 func (w *Writer) Close() error {
+	log.Printf("[rs:w] closing")
 	chunk := w.buffer.Bytes()
+
+	// Do nothing if there's no data to process.
+	if len(chunk) == 0 {
+		log.Printf("[rs:w] no data to process")
+		return nil
+	}
 
 	// Pad the chunk to the block size.
 	if len(chunk) < w.enc.BlockSize {
+		log.Printf("[rs:w] padding chunk from %d to %d", len(chunk), w.enc.BlockSize)
 		padding := make([]byte, w.enc.BlockSize-len(chunk))
 		for i := 0; i < len(padding); i++ {
 			padding[i] = 0xff
@@ -223,12 +237,14 @@ func (w *Writer) Close() error {
 	}
 
 	// Split the block into shards.
+	log.Println("[rs:w] splitting chunk")
 	shards, err := w.enc.encoder.Split(chunk)
 	if err != nil {
 		return err
 	}
 
 	// Encode parity.
+	log.Println("[rs:w] encoding parity")
 	if err = w.enc.encoder.Encode(shards); err != nil {
 		return err
 	}
@@ -242,9 +258,13 @@ func (w *Writer) Close() error {
 			// Write the shards and the hash to the destination.
 			if _, err := w.dst[i].Write(shard); err != nil {
 				return err
+			} else {
+				log.Printf("[rs:w] wrote %d bytes data to %d", len(shard), i)
 			}
 			if _, err := w.dst[i].Write(hash[:]); err != nil {
 				return err
+			} else {
+				log.Printf("[rs:w] wrote %d bytes hash to %d", len(hash), i)
 			}
 		}
 	}
