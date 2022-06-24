@@ -9,7 +9,7 @@ import (
 	"strconv"
 
 	"github.com/OhanaFS/stitch/reedsolomon"
-	"github.com/mitchellh/ioprogress"
+	"github.com/OhanaFS/stitch/util"
 )
 
 var (
@@ -72,10 +72,7 @@ func RunReedSolomonCmd() int {
 		if err != nil {
 			log.Fatalln("Failed to stat file:", err)
 		}
-		progressReader := &ioprogress.Reader{
-			Reader: file,
-			Size:   stat.Size(),
-		}
+		progressReader := util.NewProgressReader(file, stat.Size())
 
 		// Write file size to all of the shards
 		fsize := make([]byte, 8)
@@ -90,7 +87,6 @@ func RunReedSolomonCmd() int {
 		log.Println("Encoding file...")
 		w := reedsolomon.NewWriter(shards, enc)
 		if _, err := io.Copy(w, progressReader); err != nil {
-			// if err = enc.Split(progressReader, shards); err != nil {
 			log.Fatalln("Failed to split file:", err)
 		}
 	} else {

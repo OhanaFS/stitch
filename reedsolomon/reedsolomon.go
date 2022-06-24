@@ -2,6 +2,7 @@ package reedsolomon
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/sha256"
 	"fmt"
 	"io"
@@ -215,8 +216,8 @@ func (w *Writer) Close() error {
 	readSize := w.enc.BlockSize * w.enc.DataShards
 	if len(chunk) < readSize {
 		padding := make([]byte, readSize-len(chunk))
-		for i := 0; i < len(padding); i++ {
-			padding[i] = 0xff
+		if _, err := rand.Read(padding); err != nil {
+			return err
 		}
 		chunk = append(chunk, padding...)
 	}

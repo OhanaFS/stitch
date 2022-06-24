@@ -92,8 +92,6 @@ func TestReedSolomonLarge(t *testing.T) {
 	assert.Nil(err)
 	assert.Equal(len(data), n)
 	assert.Nil(w.Close())
-	// err = rs.Split(bytes.NewReader(data), writers)
-	// assert.Nil(err)
 
 	// Try to decode the data
 	readers := getReadersFromShards(t, blockSize, shards)
@@ -106,49 +104,6 @@ func TestReedSolomonLarge(t *testing.T) {
 	assert.Nil(err)
 	assert.Equal(data, b)
 }
-
-/*
-func TestReaderWriter(t *testing.T) {
-	assert := assert.New(t)
-
-	blockSize := 32
-	dataShards := 5
-	parityShards := 2
-
-	totalShards := dataShards + parityShards
-	data := makeData(blockSize * 10)
-	shards, writers := makeShardBuffer(totalShards)
-
-	rs, err := reedsolomon.NewEncoder(dataShards, parityShards, blockSize)
-	assert.Nil(err)
-
-	// Write the data
-	rsWriter := rs.NewWriter(writers)
-	n, err := rsWriter.Write(data)
-	assert.Nil(err)
-	assert.Equal(len(data), n)
-
-	// Close the writer
-	err = rsWriter.Close()
-	assert.Nil(err)
-
-	// Wait for the shards to be written
-	time.Sleep(time.Millisecond * 100)
-
-	// Grab the reader
-	readers := getReadersFromShards(t, blockSize, shards)
-	rsReader := rs.NewReader(readers, int64(len(data)))
-
-	// Read the data
-	b, err := io.ReadAll(rsReader)
-	assert.Nil(err)
-	assert.Equal(data, b)
-
-	// Close the reader
-	err = rsReader.Close()
-	assert.Nil(err)
-}
-*/
 
 func makeData(size int) []byte {
 	data := make([]byte, size)

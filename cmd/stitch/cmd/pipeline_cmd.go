@@ -10,7 +10,7 @@ import (
 	"strconv"
 
 	"github.com/OhanaFS/stitch"
-	"github.com/mitchellh/ioprogress"
+	"github.com/OhanaFS/stitch/util"
 )
 
 var (
@@ -88,16 +88,14 @@ func RunPipelineCmd() int {
 		if err != nil {
 			log.Fatalln("Failed to stat file:", err)
 		}
-		progressReader := &ioprogress.Reader{
-			Reader: file,
-			Size:   stat.Size(),
-		}
+		progressReader := util.NewProgressReader(file, stat.Size())
 
 		// Encode the file
 		log.Println("Encoding file...")
 		if err = encoder.Encode(progressReader, shardWriters, key, iv); err != nil {
 			log.Fatalln("Failed to encode file:", err)
 		}
+		fmt.Println("")
 
 		// Finalize shard headers
 		log.Println("Finalizing shard headers...")
@@ -132,10 +130,11 @@ func RunPipelineCmd() int {
 		if err != nil {
 			log.Fatalln("Failed to create reader:", err)
 		}
-		n, err := io.Copy(outputFile, reader)
+		n, err := io.Copy(outputFile, util.NewProgressReader(reader, 0))
 		if err != nil {
 			log.Fatalln("Failed to decode file:", err)
 		}
+		fmt.Println("")
 		log.Printf("Decoded %d bytes\n", n)
 	}
 

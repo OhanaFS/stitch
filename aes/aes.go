@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -147,8 +148,8 @@ func (w *AESWriter) Close() error {
 	// Pad the chunk up to the chunk size
 	if len(chunk) < w.chunkSize {
 		padding := make([]byte, w.chunkSize-len(chunk))
-		for i := 0; i < len(padding); i++ {
-			padding[i] = 'e'
+		if _, err := rand.Read(padding); err != nil {
+			return err
 		}
 		chunk = append(chunk, padding...)
 	}
@@ -262,9 +263,6 @@ func (r *AESReader) Read(p []byte) (int, error) {
 			discardedBytes = r.bytesToDiscard
 			r.bytesToDiscard = 0
 		}
-		// if len(plaintext) > len(p)-written {
-		// plaintext = plaintext[:len(p)-written]
-		// }
 		if uint64(index*r.chunkSize+len(plaintext)) > r.fileSize {
 			plaintext = plaintext[:r.fileSize-uint64(index*r.chunkSize)]
 		}

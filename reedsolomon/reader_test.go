@@ -30,8 +30,6 @@ func testReadSeekerParam(t *testing.T, blockSize, dataShards, parityShards, data
 	assert.Nil(err)
 	assert.Equal(len(data), n)
 	assert.Nil(w.Close())
-	// err = rs.Split(bytes.NewReader(data), writers)
-	// assert.Nil(err)
 
 	readers := make([]io.ReadSeeker, len(shards))
 	for i, shard := range shards {
