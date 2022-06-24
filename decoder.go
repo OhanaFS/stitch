@@ -5,6 +5,7 @@ import (
 	"crypto/cipher"
 	"fmt"
 	"io"
+	"log"
 
 	aesgcm "github.com/OhanaFS/stitch/aes"
 	"github.com/OhanaFS/stitch/header"
@@ -18,10 +19,9 @@ import (
 func (e *Encoder) NewReadSeeker(shards []io.ReadSeeker, key []byte, iv []byte) (io.ReadSeeker, error) {
 	totalShards := int(e.opts.DataShards + e.opts.ParityShards)
 
-	// Check if the number of input readers matches the number of shards in the
-	// encoder options.
-	if len(shards) != totalShards {
-		return nil, ErrShardCountMismatch
+	// Check if there are sufficient input shards
+	if len(shards) < int(e.opts.DataShards) {
+		return nil, ErrNotEnoughShards
 	}
 
 	// Seek to the beginning of each shard.
@@ -34,6 +34,7 @@ func (e *Encoder) NewReadSeeker(shards []io.ReadSeeker, key []byte, iv []byte) (
 	// Try to read the header from a shard.
 	headerBuf := make([]byte, header.HeaderSize)
 	headers := make([]header.Header, totalShards)
+	shardReaders := make([]io.ReadSeeker, totalShards)
 	hdr := header.Header{}
 	for i, shard := range shards {
 		if _, err := shard.Read(headerBuf); err != nil {
@@ -42,9 +43,19 @@ func (e *Encoder) NewReadSeeker(shards []io.ReadSeeker, key []byte, iv []byte) (
 		if err := headers[i].Decode(headerBuf); err != nil {
 			continue
 		}
-		// Sample a complete header
-		if headers[i].IsComplete {
+		if headers[i].IsComplete && headers[i].ShardIndex < totalShards {
+			shardReaders[headers[i].ShardIndex] = shard
+
+			// Sample a complete header
 			hdr = headers[i]
+		}
+	}
+
+	// Pad nil readers
+	for i, reader := range shardReaders {
+		if reader == nil {
+			log.Printf("[WARN] Missing shard %d", i)
+			shardReaders[i] = &util.ZeroReadSeeker{Size: int64(hdr.EncryptedSize)}
 		}
 	}
 
@@ -81,16 +92,16 @@ func (e *Encoder) NewReadSeeker(shards []io.ReadSeeker, key []byte, iv []byte) (
 	}
 
 	// Seek shards to beginning of data.
-	for i, shard := range shards {
-		if _, err := shard.Seek(header.HeaderSize, io.SeekStart); err != nil {
+	for i, reader := range shardReaders {
+		if _, err := reader.Seek(header.HeaderSize, io.SeekStart); err != nil {
 			return nil, fmt.Errorf("failed to seek to beginning of data in shard %d: %v", i, err)
 		}
 	}
 
 	// Prepare offset reader for shards
 	shardData := make([]io.ReadSeeker, totalShards)
-	for i, shard := range shards {
-		shardData[i] = util.NewOffsetReader(shard, header.HeaderSize)
+	for i, reader := range shardReaders {
+		shardData[i] = util.NewOffsetReader(reader, header.HeaderSize)
 	}
 
 	// Prepare the Reed-Solomon decoder.
@@ -120,7 +131,6 @@ func (e *Encoder) NewReadSeeker(shards []io.ReadSeeker, key []byte, iv []byte) (
 
 	// Limit the reader to the size of the plaintext.
 	rLim := util.NewLimitReader(rZstd, int64(hdr.FileSize))
-	// rLim := util.NewLimitReader(rAES, int64(hdr.FileSize))
 
 	// Return the reader.
 	return rLim, nil

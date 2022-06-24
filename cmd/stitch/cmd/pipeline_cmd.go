@@ -114,14 +114,15 @@ func RunPipelineCmd() int {
 		defer outputFile.Close()
 
 		// Open the input files
-		shards := make([]io.ReadSeeker, totalShards)
+		var shards []io.ReadSeeker
 		for i := 0; i < totalShards; i++ {
 			shardFile, err := os.Open(shardNames[i])
 			if err != nil {
-				log.Fatalln("Failed to open shard:", err)
+				log.Println("Failed to open shard:", err)
+				continue
 			}
 			defer shardFile.Close()
-			shards[i] = shardFile
+			shards = append(shards, shardFile)
 		}
 
 		// Decode the file

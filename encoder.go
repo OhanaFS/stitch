@@ -29,6 +29,7 @@ var (
 	ErrShardCountMismatch = errors.New("shard count mismatch")
 	ErrNonSeekableWriter  = errors.New("shards must support seeking")
 	ErrNotEnoughKeyShards = errors.New("not enough shards to reconstruct the file key")
+	ErrNotEnoughShards    = errors.New("not enough shards to reconstruct the file")
 )
 
 type EncoderOptions struct {

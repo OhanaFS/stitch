@@ -285,12 +285,6 @@ func (e *Encoder) Join(dst io.Writer, shards []io.Reader, outSize int64) error {
 		}
 	}
 
-	if brokenBlocks > 0 {
-		return ErrCorruptionDetected{
-			BlockCount: brokenBlocks,
-		}
-	}
-
 	return nil
 }
 

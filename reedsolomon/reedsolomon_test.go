@@ -1,7 +1,6 @@
 package reedsolomon_test
 
 import (
-	"fmt"
 	"io"
 	"log"
 	"testing"
@@ -10,7 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/OhanaFS/stitch/reedsolomon"
-	"github.com/OhanaFS/stitch/util/debug"
 )
 
 func TestReedSolomon(t *testing.T) {
@@ -69,7 +67,7 @@ func TestReedSolomon(t *testing.T) {
 	// Try to decode the data
 	dest = &writerseeker.WriterSeeker{}
 	err = rs.Join(dest, readers, int64(len(data)))
-	assert.Equal(reedsolomon.ErrCorruptionDetected{BlockCount: 1}, err)
+	assert.NoError(err)
 }
 
 func TestReedSolomonLarge(t *testing.T) {
@@ -138,8 +136,6 @@ func getReadersFromShards(t *testing.T, blockSize int, shards []*writerseeker.Wr
 		assert.Nil(err)
 		assert.Equal(0, len(b)%(blockSize+reedsolomon.BlockOverhead))
 		log.Printf("shard %d: %d bytes", i, len(b))
-		debug.Hexdump(b, fmt.Sprintf("shard %d", i))
-		fmt.Println("")
 
 		n, err = shards[i].Seek(0, io.SeekStart)
 		assert.Nil(err)
