@@ -76,7 +76,7 @@ func (r *ReadSeeker) Seek(offset int64, whence int) (int64, error) {
 	if whence == io.SeekCurrent {
 		offset += r.currentOffset
 	} else if whence == io.SeekEnd {
-		offset = r.outSize - offset
+		offset = r.outSize + offset
 	}
 
 	// Calculate the offset for each shard

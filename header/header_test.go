@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/OhanaFS/stitch/header"
+	"github.com/OhanaFS/stitch/util/debug"
 )
 
 var (
@@ -25,7 +26,8 @@ func TestMarshalUnmarshal(t *testing.T) {
 
 	b, err := h.Encode()
 	assert.Nil(err)
-	t.Logf("Encoded header: %v", b)
+	t.Log("Encoded header:")
+	debug.Hexdump(b, "header")
 
 	h2 := header.NewHeader()
 	err = h2.Decode(b)

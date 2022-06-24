@@ -28,14 +28,20 @@ type Header struct {
 	FileKey []byte `msgpack:"k"`
 	// FileSize is the size of the file plaintext.
 	FileSize uint64 `msgpack:"s"`
+	// EncryptedSize is the size of the file ciphertext.
+	EncryptedSize uint64 `msgpack:"e"`
+	// CompressedSize is the size of the file after compression.
+	CompressedSize uint64 `msgpack:"z"`
 	// RSBlockSize is the size of the Reed-Solomon block.
 	RSBlockSize int `msgpack:"b"`
+	// AESBlockSize is the size of the AES block.
+	AESBlockSize int `msgpack:"a"`
 	// IsComplete marks whether the header is complete.
 	IsComplete bool `msgpack:"o"`
 }
 
 // HeaderSize is the fixed size allocated for the header.
-const HeaderSize = 1024
+const HeaderSize = 512
 
 var (
 	MagicBytes = []byte("STITCHv1")

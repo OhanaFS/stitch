@@ -10,7 +10,7 @@ import (
 	"strconv"
 
 	"github.com/OhanaFS/stitch"
-	"github.com/mitchellh/ioprogress"
+	"github.com/OhanaFS/stitch/util"
 )
 
 var (
@@ -88,24 +88,54 @@ func RunPipelineCmd() int {
 		if err != nil {
 			log.Fatalln("Failed to stat file:", err)
 		}
-		progressReader := &ioprogress.Reader{
-			Reader: file,
-			Size:   stat.Size(),
-		}
+		progressReader := util.NewProgressReader(file, stat.Size())
 
 		// Encode the file
 		log.Println("Encoding file...")
 		if err = encoder.Encode(progressReader, shardWriters, key, iv); err != nil {
 			log.Fatalln("Failed to encode file:", err)
 		}
+		fmt.Println("")
 
 		// Finalize shard headers
 		log.Println("Finalizing shard headers...")
 		for i := 0; i < totalShards; i++ {
 			if err = encoder.FinalizeHeader(shardFiles[i]); err != nil {
-				log.Fatalln("Failed to finalize shard header:", err)
+				log.Fatalf("Failed to finalize shard %d: %s\n", i, err)
 			}
 		}
+	} else {
+		// Open output file for writing
+		fmt.Printf("Opening file %s for writing\n", fileName)
+		outputFile, err := os.Create(fileName)
+		if err != nil {
+			log.Fatalln("Failed to open output file:", err)
+		}
+		defer outputFile.Close()
+
+		// Open the input files
+		shards := make([]io.ReadSeeker, totalShards)
+		for i := 0; i < totalShards; i++ {
+			shardFile, err := os.Open(shardNames[i])
+			if err != nil {
+				log.Fatalln("Failed to open shard:", err)
+			}
+			defer shardFile.Close()
+			shards[i] = shardFile
+		}
+
+		// Decode the file
+		log.Println("Decoding file...")
+		reader, err := encoder.NewReadSeeker(shards, key, iv)
+		if err != nil {
+			log.Fatalln("Failed to create reader:", err)
+		}
+		n, err := io.Copy(outputFile, util.NewProgressReader(reader, 0))
+		if err != nil {
+			log.Fatalln("Failed to decode file:", err)
+		}
+		fmt.Println("")
+		log.Printf("Decoded %d bytes\n", n)
 	}
 
 	log.Println("Done.")
