@@ -53,9 +53,10 @@ func TestEncodeDecode(t *testing.T) {
 		assert.NoError(err)
 
 		// Read the data.
-		output := &bytes.Buffer{}
-		_, err = io.Copy(output, reader)
+		output := util.NewMembuf()
+		n, err := io.Copy(output, reader)
 		assert.NoError(err)
+		assert.Equal(int64(len(input)), n)
 
 		// Verify the data.
 		assert.Equal(input, output.Bytes())

@@ -21,5 +21,6 @@ func (r *OffsetReader) Read(p []byte) (n int, err error) {
 }
 
 func (r *OffsetReader) Seek(offset int64, whence int) (int64, error) {
-	return r.reader.Seek(r.offset+offset, whence)
+	n, err := r.reader.Seek(r.offset+offset, whence)
+	return n - r.offset, err
 }

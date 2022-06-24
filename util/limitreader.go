@@ -22,20 +22,37 @@ func (r *LimitReader) Read(p []byte) (n int, err error) {
 	if r.pos >= r.limit {
 		return 0, io.EOF
 	}
-	b := p[:min(len(p), int(r.limit-r.pos))]
-	n, err = r.reader.Read(b)
+
+	if int64(len(p)) > r.limit {
+		p = p[:r.limit]
+	}
+	n, err = r.reader.Read(p)
 	r.pos += int64(n)
+
 	return n, err
 }
 
 func (r *LimitReader) Seek(offset int64, whence int) (int64, error) {
+	if whence == io.SeekEnd {
+		whence = io.SeekStart
+		offset = r.limit + offset
+	}
+
 	n, err := r.reader.Seek(offset, whence)
 	r.pos = n
+
 	return r.pos, err
 }
 
-func min(a, b int) int {
+func Min(a, b int) int {
 	if a < b {
+		return a
+	}
+	return b
+}
+
+func Max(a, b int) int {
+	if a > b {
 		return a
 	}
 	return b

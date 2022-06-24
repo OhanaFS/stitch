@@ -7,9 +7,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"log"
 
-	"github.com/OhanaFS/stitch/util/debug"
+	"github.com/OhanaFS/stitch/util"
 )
 
 var (
@@ -27,6 +26,8 @@ type AESReader struct {
 	// bytesToDiscard is the number of bytes to discard after reading a chunk, to
 	// ensure that the reader is at the correct position.
 	bytesToDiscard uint64
+	// cursor is the current position in the plaintext.
+	cursor int64
 }
 
 // Assert that the AESReader struct satisfies the io.ReadSeeker interface
@@ -106,13 +107,9 @@ func (w *AESWriter) Write(p []byte) (int, error) {
 		// Encrypt chunk
 		ciphertext := w.gcm.Seal(nil, nonce, chunk, nil)
 
-		log.Printf("[aes] Writing chunk %d", index)
-		debug.Hexdump(ciphertext, "aes:ct:w")
-
 		// Write it out
 		n, err = w.ds.Write(ciphertext)
 		w.written += uint64(n)
-		log.Printf("[aes] Wrote %d bytes", n)
 
 		if err != nil {
 			return 0, err
@@ -141,11 +138,14 @@ func (w *AESWriter) GetRead() uint64 {
 // the writer.
 func (w *AESWriter) Close() error {
 	chunk := w.buffer.Bytes()
-	log.Printf("[aes] Last chunk has %d bytes", len(chunk))
+
+	// Do nothing if there's no data to write
+	if len(chunk) == 0 {
+		return nil
+	}
 
 	// Pad the chunk up to the chunk size
 	if len(chunk) < w.chunkSize {
-		log.Printf("[aes] Padding chunk with %d bytes", w.chunkSize-len(chunk))
 		padding := make([]byte, w.chunkSize-len(chunk))
 		for i := 0; i < len(padding); i++ {
 			padding[i] = 'e'
@@ -160,13 +160,9 @@ func (w *AESWriter) Close() error {
 	// Encrypt chunk
 	ciphertext := w.gcm.Seal(nil, nonce, chunk, nil)
 
-	log.Printf("[aes] Closing with chunk %d", index)
-	debug.Hexdump(ciphertext, "aes:ct:c")
-
 	// Write it out
 	n, err := w.ds.Write(ciphertext)
 	w.written += uint64(n)
-	log.Printf("[aes] Wrote %d bytes for a total of %d bytes", n, w.written)
 
 	if err != nil {
 		return err
@@ -196,22 +192,15 @@ func NewReader(ds io.ReadSeeker, key []byte, chunkSize int, fileSize uint64) (io
 
 func (r *AESReader) Seek(offset int64, whence int) (int64, error) {
 	// Calculate the offset from the start
-	var startOffset int64
 	switch whence {
 	case io.SeekStart:
-		startOffset = offset
+		r.cursor = offset
 		break
 	case io.SeekCurrent:
-		// Get the current position of the underlying reader
-		pos, err := r.ds.Seek(0, io.SeekCurrent)
-		if err != nil {
-			return 0, err
-		}
-
-		startOffset = pos + offset
+		r.cursor += offset
 		break
 	case io.SeekEnd:
-		startOffset = int64(r.fileSize) + offset
+		r.cursor = int64(r.fileSize) + offset
 		break
 	default:
 		return 0, errors.New("Invalid whence")
@@ -220,21 +209,16 @@ func (r *AESReader) Seek(offset int64, whence int) (int64, error) {
 	// Calculate the closest start block and its offset
 	chunkSize := r.chunkSize
 	overhead := r.gcm.Overhead()
-	block := FromOffset(chunkSize, 0, uint64(startOffset))
+	block := FromOffset(chunkSize, 0, uint64(r.cursor))
 	ciphertextOffset := int64(GetOffset(chunkSize, overhead, block))
-	r.bytesToDiscard = uint64(startOffset - int64(block*chunkSize))
-
-	log.Printf(
-		"[aes] Seeking to %d, block %d, ciphertext offset %d, bytes to discard %d",
-		startOffset, block, ciphertextOffset, r.bytesToDiscard,
-	)
+	r.bytesToDiscard = uint64(r.cursor - int64(block*chunkSize))
 
 	// Seek to the correct offset
 	if _, err := r.ds.Seek(ciphertextOffset, io.SeekStart); err != nil {
 		return 0, err
 	}
 
-	return startOffset, nil
+	return r.cursor, nil
 }
 
 func (r *AESReader) Read(p []byte) (int, error) {
@@ -244,14 +228,12 @@ func (r *AESReader) Read(p []byte) (int, error) {
 
 	// Get the index of the chunk
 	currentOffset, err := r.ds.Seek(0, io.SeekCurrent)
-	log.Printf("[aes] Current offset: %d", currentOffset)
 	if err != nil {
 		return 0, err
 	}
 	index := FromOffset(r.chunkSize, r.gcm.Overhead(), uint64(currentOffset))
 
 	// Read the data from the underlying reader
-	log.Printf("[aes] Reading %d blocks (%d bytes)", blocks, len(b))
 	n, err := r.ds.Read(b)
 	if err != nil {
 		return 0, err
@@ -260,17 +242,14 @@ func (r *AESReader) Read(p []byte) (int, error) {
 	// Decrypt each chunk
 	buf := bytes.NewBuffer(b)
 	written := 0
+	discardedBytes := uint64(0)
 	for i := 0; i < n; i += r.chunkSize + r.gcm.Overhead() {
-		log.Printf("[aes] Decrypting chunk at %d", i)
-
 		// Get the nonce
 		nonce := make([]byte, r.gcm.NonceSize())
 		binary.BigEndian.PutUint64(nonce, uint64(index))
 
 		// Decrypt the chunk
 		ciphertext := buf.Next(r.chunkSize + r.gcm.Overhead())
-
-		debug.Hexdump(ciphertext, "aesct")
 
 		plaintext, err := r.gcm.Open(nil, nonce, ciphertext, nil)
 		if err != nil {
@@ -280,14 +259,18 @@ func (r *AESReader) Read(p []byte) (int, error) {
 		// Discard the bytes if necessary
 		if r.bytesToDiscard > 0 {
 			plaintext = plaintext[r.bytesToDiscard:]
+			discardedBytes = r.bytesToDiscard
 			r.bytesToDiscard = 0
 		}
-		if len(plaintext) > len(p[written:]) {
-			plaintext = plaintext[:len(p[written:])]
+		// if len(plaintext) > len(p)-written {
+		// plaintext = plaintext[:len(p)-written]
+		// }
+		if uint64(index*r.chunkSize+len(plaintext)) > r.fileSize {
+			plaintext = plaintext[:r.fileSize-uint64(index*r.chunkSize)]
 		}
 
 		// Write the decrypted chunk to the output buffer
-		outidx := i / (r.chunkSize + r.gcm.Overhead()) * r.chunkSize
+		outidx := util.Max(0, (i/(r.chunkSize+r.gcm.Overhead())*r.chunkSize)-int(discardedBytes))
 		copy(p[outidx:], plaintext)
 
 		// Update the index and the written bytes
@@ -295,5 +278,6 @@ func (r *AESReader) Read(p []byte) (int, error) {
 		written += len(plaintext)
 	}
 
+	r.cursor += int64(written)
 	return written, nil
 }

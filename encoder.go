@@ -8,9 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"os"
-	"time"
 
 	aesgcm "github.com/OhanaFS/stitch/aes"
 	"github.com/OhanaFS/stitch/header"
@@ -70,12 +68,6 @@ func NewEncoder(opts *EncoderOptions) *Encoder {
 
 func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte, iv []byte) error {
 	totalShards := int(e.opts.DataShards + e.opts.ParityShards)
-	log.Printf("[DEBUG] Encoding %d shards", totalShards)
-
-	// shards := make([]io.Writer, totalShards)
-	// for i := 0; i < totalShards; i++ {
-	// shards[i] = debug.NewLogrws(real_shards[i], fmt.Sprintf("shard %d", i))
-	// }
 
 	// Check if the number of output writers matches the number of shards in the
 	// encoder options.
@@ -179,6 +171,7 @@ func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte, iv []by
 
 		// Encode
 		if _, err := wZstd.Write(chunk); err != nil {
+			// if _, err := wAES.Write(chunk); err != nil {
 			return err
 		}
 
@@ -192,33 +185,19 @@ func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte, iv []by
 		}
 	}
 
-	log.Println("Sleeping for 100ms")
-	time.Sleep(time.Millisecond * 100)
-
 	// Close the writers
-	log.Println("Closing zstd writer")
 	if err := wZstd.Close(); err != nil {
 		return err
 	}
-	log.Printf("Closing zstd encoder")
 	if err := encZstd.Close(); err != nil {
 		return err
 	}
-	log.Println("Closing AES writer")
 	if err := wAES.Close(); err != nil {
 		return err
 	}
-	log.Println("Closing Reed-Solomon writer")
 	if err := wRS.Close(); err != nil {
 		return err
 	}
-
-	// TODO: rewrite the Reed-Solomon encoder to be a Writer interface without
-	// io.Pipe. This time.Sleep is a quick workaround to allow for the encoder to
-	// finish writing the last block.
-	log.Println("Sleeping for 100ms")
-	time.Sleep(time.Millisecond * 100)
-	log.Printf("[DEBUG] Encoded %d bytes", fileSize)
 
 	// Write the complete header to the end of the file.
 	digest := hash.Sum(nil)
@@ -230,27 +209,14 @@ func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte, iv []by
 		headers[i].CompressedSize = wAES.(*aesgcm.AESWriter).GetRead()
 		headers[i].IsComplete = true
 
-		log.Printf("[DEBUG] Header %d: %+v", i, headers[i])
-
-		// Try to seek to the end of the file
-		// TODO: this shouldn't be needed anymore after the Reed-Solomon encoder
-		// is rewritten to be a Writer without io.Pipe
-		if seeker, ok := shards[i].(io.WriteSeeker); ok {
-			if _, err := seeker.Seek(0, io.SeekEnd); err != nil {
-				return fmt.Errorf("failed to seek to end of file: %v", err)
-			}
-		}
-
 		// Write the updated header to the end of the shard.
 		b, err := headers[i].Encode()
 		if err != nil {
 			return err
 		}
-		n, err := shards[i].Write(b)
-		if err != nil {
+		if _, err := shards[i].Write(b); err != nil {
 			return err
 		}
-		log.Printf("Wrote %d bytes footer to shard %d", n, i)
 	}
 
 	return nil

@@ -55,4 +55,17 @@ func TestAES(t *testing.T) {
 	assert.NoError(err)
 	assert.Equal(len(datatext), n)
 	assert.Equal(datatext, string(res[:]))
+
+	// Seek to the middle of the data
+	midpoint := int64(len(datatext) / 2)
+	ns, err := r.Seek(midpoint, io.SeekStart)
+	assert.NoError(err)
+	assert.Equal(midpoint, ns)
+
+	// Read the rest of the data
+	res = make([]byte, 20)
+	n, err = r.Read(res)
+	assert.NoError(err)
+	assert.Equal(len(datatext)-int(midpoint), n)
+	assert.Equal(datatext[midpoint:], string(res[:midpoint]))
 }

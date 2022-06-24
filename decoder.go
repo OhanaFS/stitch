@@ -11,7 +11,6 @@ import (
 	"github.com/OhanaFS/stitch/header"
 	"github.com/OhanaFS/stitch/reedsolomon"
 	"github.com/OhanaFS/stitch/util"
-	"github.com/OhanaFS/stitch/util/debug"
 	seekable "github.com/SaveTheRbtz/zstd-seekable-format-go"
 	"github.com/hashicorp/vault/shamir"
 	"github.com/klauspost/compress/zstd"
@@ -39,11 +38,9 @@ func (e *Encoder) NewReadSeeker(shards []io.ReadSeeker, key []byte, iv []byte) (
 	hdr := header.Header{}
 	for i, shard := range shards {
 		if _, err := shard.Read(headerBuf); err != nil {
-			log.Printf("Failed to read header from shard %d: %v", i, err)
 			continue
 		}
 		if err := headers[i].Decode(headerBuf); err != nil {
-			log.Printf("Failed to decode header from shard %d: %v", i, err)
 			continue
 		}
 		// Sample a complete header
@@ -51,9 +48,6 @@ func (e *Encoder) NewReadSeeker(shards []io.ReadSeeker, key []byte, iv []byte) (
 			hdr = headers[i]
 		}
 	}
-
-	// Debug print the header as JSON
-	log.Printf("Header: %+v", hdr)
 
 	// Reconstruct the file key from the headers.
 	var fileKeyPieces [][]byte
@@ -107,11 +101,7 @@ func (e *Encoder) NewReadSeeker(shards []io.ReadSeeker, key []byte, iv []byte) (
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Reed-Solomon encoder: %v", err)
 	}
-	rRS := debug.NewLogrws(reedsolomon.NewReadSeeker(encRS, shardData, int64(hdr.EncryptedSize)), "rRS")
-
-	// Read whole file into memory.
-	log.Printf("Reading whole flie")
-	io.Copy(io.Discard, rRS)
+	rRS := reedsolomon.NewReadSeeker(encRS, shardData, int64(hdr.EncryptedSize))
 
 	// Prepare the AES cipher to decrypt the data.
 	rAES, err := aesgcm.NewReader(rRS, fileKey, hdr.AESBlockSize, hdr.CompressedSize)
@@ -131,6 +121,8 @@ func (e *Encoder) NewReadSeeker(shards []io.ReadSeeker, key []byte, iv []byte) (
 
 	// Limit the reader to the size of the plaintext.
 	rLim := util.NewLimitReader(rZstd, int64(hdr.FileSize))
+	// rLim := util.NewLimitReader(rAES, int64(hdr.FileSize))
+	log.Printf("[DEBUG] stitch: created read seeker with size %d", hdr.FileSize)
 
 	// Return the reader.
 	return rLim, nil
