@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
+	"time"
 
 	aesgcm "github.com/OhanaFS/stitch/aes"
 	"github.com/OhanaFS/stitch/header"
@@ -28,7 +30,7 @@ const (
 var (
 	ErrShardCountMismatch = errors.New("shard count mismatch")
 	ErrNonSeekableWriter  = errors.New("shards must support seeking")
-	ErrNotEnoughKeyShards = errors.New("not shards to reconstruct the file key")
+	ErrNotEnoughKeyShards = errors.New("not enough shards to reconstruct the file key")
 )
 
 type EncoderOptions struct {
@@ -68,6 +70,7 @@ func NewEncoder(opts *EncoderOptions) *Encoder {
 
 func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte, iv []byte) error {
 	totalShards := int(e.opts.DataShards + e.opts.ParityShards)
+	log.Printf("[DEBUG] Encoding %d shards", totalShards)
 
 	// Check if the number of output writers matches the number of shards in the
 	// encoder options.
@@ -78,17 +81,17 @@ func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte, iv []by
 	// Prepare a 256-bit AES key to encrypt the data.
 	fileKey := make([]byte, 32)
 	if _, err := rand.Read(fileKey); err != nil {
-		return err
+		return fmt.Errorf("failed to generate file key: %v", err)
 	}
 
 	// Encrypt the file key with the user-supplied key and iv.
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create AES cipher: %v", err)
 	}
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create AES-GCM: %v", err)
 	}
 	fileKeyCiphertext := gcm.Seal(nil, iv, fileKey, nil)
 
@@ -97,7 +100,7 @@ func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte, iv []by
 		fileKeyCiphertext, totalShards, int(e.opts.KeyThreshold),
 	)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to split file key: %v", err)
 	}
 
 	// Prepare headers for each shard.
@@ -119,10 +122,10 @@ func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte, iv []by
 		// Write the header to the shard.
 		b, err := headers[i].Encode()
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to encode header: %v", err)
 		}
 		if _, err := shards[i].Write(b); err != nil {
-			return err
+			return fmt.Errorf("failed to write header: %v", err)
 		}
 	}
 
@@ -131,30 +134,26 @@ func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte, iv []by
 		int(e.opts.DataShards), int(e.opts.ParityShards), rsBlockSize,
 	)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create Reed-Solomon encoder: %v", err)
 	}
 
 	// Prepare the Reed-Solomon writer.
-	wShards := make([]io.Writer, totalShards)
-	for i, shard := range shards {
-		wShards[i] = shard
-	}
-	wRS := encRS.NewWriter(wShards)
+	wRS := encRS.NewWriter(shards)
 
 	// Prepare the AES writer.
 	wAES, err := aesgcm.NewWriter(wRS, fileKey, aesBlockSize)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create AES writer: %v", err)
 	}
 
 	// Prepare the zstd compressor.
 	encZstd, err := zstd.NewWriter(nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create zstd writer: %v", err)
 	}
 	wZstd, err := seekable.NewWriter(wAES, encZstd)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create zstd writer: %v", err)
 	}
 
 	// Start encoding
@@ -166,7 +165,10 @@ func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte, iv []by
 		// Read a block of data
 		n, err := data.Read(chunk)
 		if err != nil {
-			return err
+			if err == io.EOF {
+				break
+			}
+			return fmt.Errorf("failed to read data: %v", err)
 		}
 		fileSize += uint64(n)
 
@@ -199,6 +201,13 @@ func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte, iv []by
 		return err
 	}
 
+	// TODO: rewrite the Reed-Solomon encoder to be a Writer interface without
+	// io.Pipe. This time.Sleep is a quick workaround to allow for the encoder to
+	// finish writing the last block.
+	log.Println("Sleeping for 100ms")
+	time.Sleep(time.Millisecond * 100)
+	log.Printf("[DEBUG] Encoded %d bytes", fileSize)
+
 	// Write the complete header to the end of the file.
 	digest := hash.Sum(nil)
 	for i := 0; i < totalShards; i++ {
@@ -209,14 +218,27 @@ func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte, iv []by
 		headers[i].CompressedSize = wAES.(*aesgcm.AESWriter).GetRead()
 		headers[i].IsComplete = true
 
+		log.Printf("[DEBUG] Header %d: %+v", i, headers[i])
+
+		// Try to seek to the end of the file
+		// TODO: this shouldn't be needed anymore after the Reed-Solomon encoder
+		// is rewritten to be a Writer without io.Pipe
+		if seeker, ok := shards[i].(io.WriteSeeker); ok {
+			if _, err := seeker.Seek(0, io.SeekEnd); err != nil {
+				return fmt.Errorf("failed to seek to end of file: %v", err)
+			}
+		}
+
 		// Write the updated header to the end of the shard.
 		b, err := headers[i].Encode()
 		if err != nil {
 			return err
 		}
-		if _, err := shards[i].Write(b); err != nil {
+		n, err := shards[i].Write(b)
+		if err != nil {
 			return err
 		}
+		log.Printf("Wrote %d bytes footer to shard %d", n, i)
 	}
 
 	return nil

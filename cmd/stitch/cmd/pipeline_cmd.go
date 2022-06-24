@@ -103,7 +103,7 @@ func RunPipelineCmd() int {
 		log.Println("Finalizing shard headers...")
 		for i := 0; i < totalShards; i++ {
 			if err = encoder.FinalizeHeader(shardFiles[i]); err != nil {
-				log.Fatalln("Failed to finalize shard header:", err)
+				log.Fatalf("Failed to finalize shard %d: %s\n", i, err)
 			}
 		}
 	} else {

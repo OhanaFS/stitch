@@ -8,6 +8,8 @@ import (
 	"errors"
 	"io"
 	"log"
+
+	"github.com/OhanaFS/stitch/util/debug"
 )
 
 var (
@@ -242,6 +244,7 @@ func (r *AESReader) Read(p []byte) (int, error) {
 	buf := bytes.NewBuffer(b)
 	written := 0
 	for i := 0; i < n; i += r.chunkSize + r.gcm.Overhead() {
+		log.Printf("[aes] Decrypting chunk at %d", i)
 
 		// Get the nonce
 		nonce := make([]byte, r.gcm.NonceSize())
@@ -249,6 +252,8 @@ func (r *AESReader) Read(p []byte) (int, error) {
 
 		// Decrypt the chunk
 		ciphertext := buf.Next(r.chunkSize + r.gcm.Overhead())
+
+		debug.Hexdump(ciphertext)
 
 		plaintext, err := r.gcm.Open(nil, nonce, ciphertext, nil)
 		if err != nil {

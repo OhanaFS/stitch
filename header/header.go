@@ -1,7 +1,6 @@
 package header
 
 import (
-	"crypto/rand"
 	"encoding/binary"
 	"errors"
 
@@ -58,9 +57,16 @@ func NewHeader() *Header {
 func (h *Header) Encode() ([]byte, error) {
 	// Allocate a buffer for the header.
 	buf := make([]byte, HeaderSize)
-	if _, err := rand.Read(buf); err != nil {
-		return nil, err
+	for i := range buf {
+		if h.IsComplete {
+			buf[i] = 0xcc
+		} else {
+			buf[i] = 0xaa
+		}
 	}
+	// if _, err := rand.Read(buf); err != nil {
+	// return nil, err
+	// }
 
 	// Write the magic bytes.
 	copy(buf[:8], MagicBytes)

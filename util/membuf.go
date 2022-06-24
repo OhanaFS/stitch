@@ -55,3 +55,7 @@ func (m *Membuf) Seek(offset int64, whence int) (int64, error) {
 func (m *Membuf) Len() int {
 	return len(m.buf)
 }
+
+func (m *Membuf) Bytes() []byte {
+	return m.buf
+}
