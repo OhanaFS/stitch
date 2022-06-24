@@ -354,21 +354,6 @@ func (e *Encoder) Join(dst io.Writer, shards []io.Reader, outSize int64) error {
 	return nil
 }
 
-/*
-// NewWriter wraps the Split method and returns a new io.WriteCloser.
-func (e *Encoder) NewWriter(dst []io.Writer) io.WriteCloser {
-	r, w := io.Pipe()
-	go func() {
-		if err := e.Split(r, dst); err != nil {
-			w.CloseWithError(err)
-		} else {
-			w.Close()
-		}
-	}()
-	return w
-}
-*/
-
 // NewReader wraps the Join method and returns a new io.ReadCloser.
 func (e *Encoder) NewReader(shards []io.Reader, outSize int64) io.ReadCloser {
 	r, w := io.Pipe()

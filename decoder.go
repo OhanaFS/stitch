@@ -5,7 +5,6 @@ import (
 	"crypto/cipher"
 	"fmt"
 	"io"
-	"log"
 
 	aesgcm "github.com/OhanaFS/stitch/aes"
 	"github.com/OhanaFS/stitch/header"
@@ -122,7 +121,6 @@ func (e *Encoder) NewReadSeeker(shards []io.ReadSeeker, key []byte, iv []byte) (
 	// Limit the reader to the size of the plaintext.
 	rLim := util.NewLimitReader(rZstd, int64(hdr.FileSize))
 	// rLim := util.NewLimitReader(rAES, int64(hdr.FileSize))
-	log.Printf("[DEBUG] stitch: created read seeker with size %d", hdr.FileSize)
 
 	// Return the reader.
 	return rLim, nil

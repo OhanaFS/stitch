@@ -73,7 +73,6 @@ func TestReedSolomon(t *testing.T) {
 }
 
 func TestReedSolomonLarge(t *testing.T) {
-	return
 	assert := assert.New(t)
 
 	blockSize := 1024 * 1024

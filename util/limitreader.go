@@ -1,6 +1,8 @@
 package util
 
-import "io"
+import (
+	"io"
+)
 
 // LimitReader wraps an io.ReadSeeker and limits the number of bytes that can
 // be read.
@@ -23,8 +25,8 @@ func (r *LimitReader) Read(p []byte) (n int, err error) {
 		return 0, io.EOF
 	}
 
-	if int64(len(p)) > r.limit {
-		p = p[:r.limit]
+	if r.pos+int64(len(p)) > r.limit {
+		p = p[:r.limit-r.pos]
 	}
 	n, err = r.reader.Read(p)
 	r.pos += int64(n)
