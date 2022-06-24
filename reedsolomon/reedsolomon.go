@@ -68,8 +68,7 @@ func NewWriter(dst []io.Writer, enc *Encoder) *Writer {
 	}
 }
 
-/*
-// Split splits the data into the number of shards given to it, and writes the
+// Write splits the data into the number of shards given to it, and writes the
 // shards to the writers. Note that the caller must keep track of the following
 // metadata in order to correctly reconstruct the data:
 //
@@ -80,66 +79,6 @@ func NewWriter(dst []io.Writer, enc *Encoder) *Writer {
 // * The order of the shards
 //
 // This function also adds a sha256 hash every `blockSize` bytes.
-func (e *Encoder) Split(data io.Reader, dst []io.Writer) error {
-	totalShards := e.DataShards + e.ParityShards
-	if len(dst) != totalShards {
-		return fmt.Errorf("expected %d shards, got %d", totalShards, len(dst))
-	}
-
-	readSize := e.BlockSize * e.DataShards
-	buf := make([]byte, readSize)
-
-	for {
-		// Read a block.
-		n, err := data.Read(buf)
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			return err
-		}
-
-		// If block is smaller than blockSize*dataShards, pad it.
-		if n < readSize {
-			padding := make([]byte, readSize-n)
-			for i := 0; i < len(padding); i++ {
-				padding[i] = 0xff
-			}
-			buf = append(buf[:n], padding...)
-		}
-
-		// Split the block into shards.
-		shards, err := e.encoder.Split(buf)
-		if err != nil {
-			return err
-		}
-
-		// Encode parity.
-		if err = e.encoder.Encode(shards); err != nil {
-			return err
-		}
-
-		for i, shard := range shards {
-			if dst[i] != nil {
-				// Calculate the hash of the shard.
-				hash := sha256.Sum256(shard)
-
-				// Write the shards and the hash to the destination.
-				if _, err := dst[i].Write(shard); err != nil {
-					return err
-				}
-				if _, err := dst[i].Write(hash[:]); err != nil {
-					return err
-				}
-			}
-		}
-	}
-
-	return nil
-}
-*/
-
-// Write implements io.WriteCloser
 func (w *Writer) Write(p []byte) (n int, err error) {
 	// Append p to the buffer.
 	n, err = w.buffer.Write(p)
