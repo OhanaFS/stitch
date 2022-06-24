@@ -4,19 +4,39 @@ Compress, encrypt, and split files into pieces. Then stitch them together again.
 
 ```
 # Building
-go build ./cmd/stitch
+make
 
 # Testing
-go test ./...
+make test
 ```
+
+## How it works
+
+![pipeline](./.github/images/pipeline.png)
 
 ## Use the command-line interface
 
-Currently there is a basic CLI for the reed-solomon encoder:
+Currently there is a basic CLI for the pipeline encoder:
 
 ```
-go run ./cmd/stitch reedsolomon --help
+go run ./cmd/stitch pipeline --help
 ```
+
+To encode files, use the `-input` flag:
+
+```
+go run ./cmd/stitch pipeline -input file.bin
+```
+
+The command will create `file.bin.shardX` files in the same directory. To
+decode, use the `-output` flag:
+
+```
+go run ./cmd/stitch pipeline -output file.bin
+```
+
+The command will look for `file.bin.shardX` files and use it to reconstruct
+`file.bin`.
 
 ## Usage as a library
 
