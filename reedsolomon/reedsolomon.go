@@ -227,9 +227,10 @@ func (w *Writer) Close() error {
 	}
 
 	// Pad the chunk to the block size.
-	if len(chunk) < w.enc.BlockSize {
-		log.Printf("[rs:w] padding chunk from %d to %d", len(chunk), w.enc.BlockSize)
-		padding := make([]byte, w.enc.BlockSize-len(chunk))
+	readSize := w.enc.BlockSize * w.enc.DataShards
+	if len(chunk) < readSize {
+		log.Printf("[rs:w] padding chunk from %d to %d", len(chunk), readSize)
+		padding := make([]byte, readSize-len(chunk))
 		for i := 0; i < len(padding); i++ {
 			padding[i] = 0xff
 		}
