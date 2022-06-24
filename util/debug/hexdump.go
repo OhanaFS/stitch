@@ -3,16 +3,19 @@ package debug
 import "fmt"
 
 // Hexdump is a helper function that prints a hexdump of the given data.
-func Hexdump(data []byte) {
-	bytesPerLine := 16
+func Hexdump(data []byte, prefix string) {
+	bytesPerLine := 32
 
 	for i := 0; i < len(data); i += bytesPerLine {
-		fmt.Printf("%04x: ", i)
+		fmt.Printf("[%s] %04x: ", prefix, i)
 		for j := 0; j < bytesPerLine; j++ {
 			if i+j < len(data) {
 				fmt.Printf("%02x ", data[i+j])
 			} else {
 				fmt.Printf("   ")
+			}
+			if j%8 == 7 {
+				fmt.Printf(" ")
 			}
 		}
 		fmt.Printf(" ")

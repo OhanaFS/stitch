@@ -27,7 +27,7 @@ func TestMarshalUnmarshal(t *testing.T) {
 	b, err := h.Encode()
 	assert.Nil(err)
 	t.Log("Encoded header:")
-	debug.Hexdump(b)
+	debug.Hexdump(b, "header")
 
 	h2 := header.NewHeader()
 	err = h2.Decode(b)

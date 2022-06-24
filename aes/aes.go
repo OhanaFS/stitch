@@ -45,7 +45,7 @@ type AESWriter struct {
 	written uint64
 }
 
-// Asert that the AESWriter struct satisfies the io.Writer interface
+// Asert that the AESWriter struct satisfies the io.WriteCloser interface
 var _ io.WriteCloser = &AESWriter{}
 
 // GetOffset returns the offset of the chunk specified by the index.
@@ -106,9 +106,13 @@ func (w *AESWriter) Write(p []byte) (int, error) {
 		// Encrypt chunk
 		ciphertext := w.gcm.Seal(nil, nonce, chunk, nil)
 
+		log.Printf("[aes] Writing chunk %d", index)
+		debug.Hexdump(ciphertext, "aes:ct:w")
+
 		// Write it out
 		n, err = w.ds.Write(ciphertext)
 		w.written += uint64(n)
+		log.Printf("[aes] Wrote %d bytes", n)
 
 		if err != nil {
 			return 0, err
@@ -137,19 +141,32 @@ func (w *AESWriter) GetRead() uint64 {
 // the writer.
 func (w *AESWriter) Close() error {
 	chunk := w.buffer.Bytes()
+	log.Printf("[aes] Last chunk has %d bytes", len(chunk))
 
 	// Pad the chunk up to the chunk size
 	if len(chunk) < w.chunkSize {
-		chunk = append(chunk, make([]byte, w.chunkSize-len(chunk))...)
+		log.Printf("[aes] Padding chunk with %d bytes", w.chunkSize-len(chunk))
+		padding := make([]byte, w.chunkSize-len(chunk))
+		for i := 0; i < len(padding); i++ {
+			padding[i] = 'e'
+		}
+		chunk = append(chunk, padding...)
 	}
 
 	index := FromOffset(w.chunkSize, w.gcm.Overhead(), w.written)
 	nonce := make([]byte, w.gcm.NonceSize())
 	binary.BigEndian.PutUint64(nonce, uint64(index))
 
+	// Encrypt chunk
 	ciphertext := w.gcm.Seal(nil, nonce, chunk, nil)
+
+	log.Printf("[aes] Closing with chunk %d", index)
+	debug.Hexdump(ciphertext, "aes:ct:c")
+
+	// Write it out
 	n, err := w.ds.Write(ciphertext)
 	w.written += uint64(n)
+	log.Printf("[aes] Wrote %d bytes for a total of %d bytes", n, w.written)
 
 	if err != nil {
 		return err
@@ -253,7 +270,7 @@ func (r *AESReader) Read(p []byte) (int, error) {
 		// Decrypt the chunk
 		ciphertext := buf.Next(r.chunkSize + r.gcm.Overhead())
 
-		debug.Hexdump(ciphertext)
+		debug.Hexdump(ciphertext, "aesct")
 
 		plaintext, err := r.gcm.Open(nil, nonce, ciphertext, nil)
 		if err != nil {

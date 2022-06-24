@@ -40,7 +40,7 @@ type Header struct {
 }
 
 // HeaderSize is the fixed size allocated for the header.
-const HeaderSize = 1024
+const HeaderSize = 512
 
 var (
 	MagicBytes = []byte("STITCHv1")
@@ -59,9 +59,9 @@ func (h *Header) Encode() ([]byte, error) {
 	buf := make([]byte, HeaderSize)
 	for i := range buf {
 		if h.IsComplete {
-			buf[i] = 0xcc
+			buf[i] = '!'
 		} else {
-			buf[i] = 0xaa
+			buf[i] = '?'
 		}
 	}
 	// if _, err := rand.Read(buf); err != nil {

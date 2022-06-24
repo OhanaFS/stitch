@@ -24,7 +24,7 @@ const (
 	// rsBlockSize is the size of a Reed-Solomon block.
 	rsBlockSize = 4096
 	// aesBlockSize is the size of a chunk of data that is encrypted with AES-GCM.
-	aesBlockSize = 4096
+	aesBlockSize = 1024
 )
 
 var (
@@ -71,6 +71,11 @@ func NewEncoder(opts *EncoderOptions) *Encoder {
 func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte, iv []byte) error {
 	totalShards := int(e.opts.DataShards + e.opts.ParityShards)
 	log.Printf("[DEBUG] Encoding %d shards", totalShards)
+
+	// shards := make([]io.Writer, totalShards)
+	// for i := 0; i < totalShards; i++ {
+	// shards[i] = debug.NewLogrws(real_shards[i], fmt.Sprintf("shard %d", i))
+	// }
 
 	// Check if the number of output writers matches the number of shards in the
 	// encoder options.
@@ -138,7 +143,7 @@ func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte, iv []by
 	}
 
 	// Prepare the Reed-Solomon writer.
-	wRS := encRS.NewWriter(shards)
+	wRS := reedsolomon.NewWriter(shards, encRS)
 
 	// Prepare the AES writer.
 	wAES, err := aesgcm.NewWriter(wRS, fileKey, aesBlockSize)
@@ -187,16 +192,23 @@ func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte, iv []by
 		}
 	}
 
+	log.Println("Sleeping for 100ms")
+	time.Sleep(time.Millisecond * 100)
+
 	// Close the writers
+	log.Println("Closing zstd writer")
 	if err := wZstd.Close(); err != nil {
 		return err
 	}
+	log.Printf("Closing zstd encoder")
 	if err := encZstd.Close(); err != nil {
 		return err
 	}
+	log.Println("Closing AES writer")
 	if err := wAES.Close(); err != nil {
 		return err
 	}
+	log.Println("Closing Reed-Solomon writer")
 	if err := wRS.Close(); err != nil {
 		return err
 	}

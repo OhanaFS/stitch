@@ -16,12 +16,6 @@ func TestEncodeDecode(t *testing.T) {
 	assert := assert.New(t)
 
 	runTest := func(input []byte) {
-		if len(input) < 128 {
-			t.Logf("Input: %s", input)
-		} else {
-			t.Logf("Input: %s... (%d bytes)", input[:128], len(input))
-		}
-
 		inputBuffer := &bytes.Buffer{}
 		inputBuffer.Write(input)
 		// inputBuffer := bytes.NewBuffer([]byte(input))
@@ -52,7 +46,7 @@ func TestEncodeDecode(t *testing.T) {
 			assert.NoError(encoder.FinalizeHeader(shard))
 		}
 
-		debug.Hexdump(shards[0].Bytes())
+		debug.Hexdump(shards[0].Bytes(), "shard0")
 
 		// Decode the data
 		reader, err := encoder.NewReadSeeker(shardReaders, key, iv)
@@ -67,10 +61,16 @@ func TestEncodeDecode(t *testing.T) {
 		assert.Equal(input, output.Bytes())
 	}
 
-	runTest([]byte("hello, world!"))
+	// runTest([]byte("hello, world!"))
 
-	random := make([]byte, 4096)
+	random := make([]byte, 3922)
 	_, err := rand.Read(random)
 	assert.NoError(err)
 	runTest(random)
+
+	// dddd := make([]byte, 8192)
+	// for i := 0; i < len(dddd); i++ {
+	// dddd[i] = 0xdd
+	// }
+	// runTest(dddd)
 }

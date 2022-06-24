@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
+	"log"
 
 	rs "github.com/klauspost/reedsolomon"
 )
@@ -30,16 +31,44 @@ type Encoder struct {
 	DataShards   int
 	ParityShards int
 	BlockSize    int
+	encoder      rs.Encoder
 }
 
 func NewEncoder(dataShards, parityShards, blockSize int) (*Encoder, error) {
+	enc, err := rs.New(dataShards, parityShards)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Encoder{
-		dataShards,
-		parityShards,
-		blockSize,
+		DataShards:   dataShards,
+		ParityShards: parityShards,
+		BlockSize:    blockSize,
+		encoder:      enc,
 	}, nil
 }
 
+type Writer struct {
+	dst []io.Writer
+	enc *Encoder
+
+	buffer  bytes.Buffer
+	read    uint64
+	written uint64
+}
+
+// Assert that Writer implements the io.WriteCloser interface.
+var _ io.WriteCloser = &Writer{}
+
+// NewWriter creates a new Writer.
+func NewWriter(dst []io.Writer, enc *Encoder) *Writer {
+	return &Writer{
+		dst: dst,
+		enc: enc,
+	}
+}
+
+/*
 // Split splits the data into the number of shards given to it, and writes the
 // shards to the writers. Note that the caller must keep track of the following
 // metadata in order to correctly reconstruct the data:
@@ -59,10 +88,6 @@ func (e *Encoder) Split(data io.Reader, dst []io.Writer) error {
 
 	readSize := e.BlockSize * e.DataShards
 	buf := make([]byte, readSize)
-	enc, err := rs.New(e.DataShards, e.ParityShards)
-	if err != nil {
-		return err
-	}
 
 	for {
 		// Read a block.
@@ -76,17 +101,21 @@ func (e *Encoder) Split(data io.Reader, dst []io.Writer) error {
 
 		// If block is smaller than blockSize*dataShards, pad it.
 		if n < readSize {
-			buf = append(buf[:n], make([]byte, readSize-n)...)
+			padding := make([]byte, readSize-n)
+			for i := 0; i < len(padding); i++ {
+				padding[i] = 0xff
+			}
+			buf = append(buf[:n], padding...)
 		}
 
 		// Split the block into shards.
-		shards, err := enc.Split(buf)
+		shards, err := e.encoder.Split(buf)
 		if err != nil {
 			return err
 		}
 
 		// Encode parity.
-		if err = enc.Encode(shards); err != nil {
+		if err = e.encoder.Encode(shards); err != nil {
 			return err
 		}
 
@@ -102,6 +131,120 @@ func (e *Encoder) Split(data io.Reader, dst []io.Writer) error {
 				if _, err := dst[i].Write(hash[:]); err != nil {
 					return err
 				}
+			}
+		}
+	}
+
+	return nil
+}
+*/
+
+// Write implements io.WriteCloser
+func (w *Writer) Write(p []byte) (n int, err error) {
+	// Append p to the buffer.
+	n, err = w.buffer.Write(p)
+	w.read += uint64(n)
+	if err != nil {
+		log.Printf("1 returning n = %d", n)
+		return n, err
+	}
+
+	// Process the buffer until there's not enough data to process
+	chunk := make([]byte, w.enc.BlockSize)
+	for {
+		if w.buffer.Len() < w.enc.BlockSize {
+			break
+		}
+
+		// Read up to the block size.
+		n, err = w.buffer.Read(chunk)
+		if err != nil {
+			log.Printf("2 returning n = %d", n)
+			return n, err
+		}
+
+		// Split the block into shards.
+		shards, err := w.enc.encoder.Split(chunk[:n])
+		if err != nil {
+			log.Printf("3 returning n = %d", n)
+			return n, err
+		}
+
+		// Encode parity.
+		if err = w.enc.encoder.Encode(shards); err != nil {
+			log.Printf("4 returning n = %d", n)
+			return n, err
+		}
+
+		// Write the shards to the destination.
+		for i, shard := range shards {
+			if w.dst[i] != nil {
+				// Calculate the hash of the shard.
+				hash := sha256.Sum256(shard)
+
+				// Write the shards and the hash to the destination.
+				n, err := w.dst[i].Write(shard)
+				if err != nil {
+					log.Printf("5 returning n = %d", n)
+					return n, err
+				}
+				w.written += uint64(n)
+
+				n, err = w.dst[i].Write(hash[:])
+				if err != nil {
+					log.Printf("6 returning n = %d", n)
+					return n, err
+				}
+				w.written += uint64(n)
+			}
+		}
+	}
+
+	// Clean up the buffer.
+	b := bytes.Buffer{}
+	b.Write(w.buffer.Bytes())
+	w.buffer = b
+
+	log.Printf("done, returning n = %d", len(p))
+	return len(p), nil
+}
+
+// Close implements io.WriteCloser
+func (w *Writer) Close() error {
+	chunk := w.buffer.Bytes()
+
+	// Pad the chunk to the block size.
+	if len(chunk) < w.enc.BlockSize {
+		padding := make([]byte, w.enc.BlockSize-len(chunk))
+		for i := 0; i < len(padding); i++ {
+			padding[i] = 0xff
+		}
+		chunk = append(chunk, padding...)
+	}
+
+	// Split the block into shards.
+	shards, err := w.enc.encoder.Split(chunk)
+	if err != nil {
+		return err
+	}
+
+	// Encode parity.
+	if err = w.enc.encoder.Encode(shards); err != nil {
+		return err
+	}
+
+	// Write the shards to the destination.
+	for i, shard := range shards {
+		if w.dst[i] != nil {
+			// Calculate the hash of the shard.
+			hash := sha256.Sum256(shard)
+
+			// Write the shards and the hash to the destination.
+			if _, err := w.dst[i].Write(shard); err != nil {
+				return err
+			}
+			if _, err := w.dst[i].Write(hash[:]); err != nil {
+				return err
 			}
 		}
 	}
@@ -212,6 +355,7 @@ func (e *Encoder) Join(dst io.Writer, shards []io.Reader, outSize int64) error {
 	return nil
 }
 
+/*
 // NewWriter wraps the Split method and returns a new io.WriteCloser.
 func (e *Encoder) NewWriter(dst []io.Writer) io.WriteCloser {
 	r, w := io.Pipe()
@@ -224,6 +368,7 @@ func (e *Encoder) NewWriter(dst []io.Writer) io.WriteCloser {
 	}()
 	return w
 }
+*/
 
 // NewReader wraps the Join method and returns a new io.ReadCloser.
 func (e *Encoder) NewReader(shards []io.Reader, outSize int64) io.ReadCloser {

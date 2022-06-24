@@ -11,6 +11,7 @@ import (
 	"github.com/OhanaFS/stitch/header"
 	"github.com/OhanaFS/stitch/reedsolomon"
 	"github.com/OhanaFS/stitch/util"
+	"github.com/OhanaFS/stitch/util/debug"
 	seekable "github.com/SaveTheRbtz/zstd-seekable-format-go"
 	"github.com/hashicorp/vault/shamir"
 	"github.com/klauspost/compress/zstd"
@@ -106,7 +107,11 @@ func (e *Encoder) NewReadSeeker(shards []io.ReadSeeker, key []byte, iv []byte) (
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Reed-Solomon encoder: %v", err)
 	}
-	rRS := reedsolomon.NewReadSeeker(encRS, shardData, int64(hdr.EncryptedSize))
+	rRS := debug.NewLogrws(reedsolomon.NewReadSeeker(encRS, shardData, int64(hdr.EncryptedSize)), "rRS")
+
+	// Read whole file into memory.
+	log.Printf("Reading whole flie")
+	io.Copy(io.Discard, rRS)
 
 	// Prepare the AES cipher to decrypt the data.
 	rAES, err := aesgcm.NewReader(rRS, fileKey, hdr.AESBlockSize, hdr.CompressedSize)

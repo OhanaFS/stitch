@@ -88,7 +88,9 @@ func RunReedSolomonCmd() int {
 
 		// Encode the file
 		log.Println("Encoding file...")
-		if err = enc.Split(progressReader, shards); err != nil {
+		w := reedsolomon.NewWriter(shards, enc)
+		if _, err := io.Copy(w, progressReader); err != nil {
+			// if err = enc.Split(progressReader, shards); err != nil {
 			log.Fatalln("Failed to split file:", err)
 		}
 	} else {

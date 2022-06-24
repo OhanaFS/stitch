@@ -14,6 +14,7 @@ type Logrws[T any] struct {
 
 // Assert that the Logrws struct satisfies the io.ReadWriteSeeker interface.
 var _ io.ReadWriteSeeker = &Logrws[io.ReadWriteSeeker]{}
+var _ io.Closer = &Logrws[io.Closer]{}
 
 func NewLogrws[T any](rws T, prefix string) *Logrws[T] {
 	return &Logrws[T]{rws: rws, prefix: prefix}
@@ -27,6 +28,7 @@ func (l *Logrws[T]) Read(p []byte) (n int, err error) {
 			return n, err
 		}
 		log.Printf("%s.Read(%d) = %d", l.prefix, len(p), n)
+		Hexdump(p[:n], l.prefix+":r")
 		return n, nil
 	}
 	return 0, fmt.Errorf("%s is not a io.Reader", l.prefix)
@@ -40,6 +42,7 @@ func (l *Logrws[T]) Write(p []byte) (n int, err error) {
 			return n, err
 		}
 		log.Printf("%s.Write(%d) = %d", l.prefix, len(p), n)
+		Hexdump(p[:n], l.prefix+":w")
 		return n, nil
 	}
 	return 0, fmt.Errorf("%s is not a io.Writer", l.prefix)
@@ -52,4 +55,12 @@ func (l *Logrws[T]) Seek(offset int64, whence int) (int64, error) {
 		return s.Seek(offset, whence)
 	}
 	return 0, fmt.Errorf("%s is not a io.Seeker", l.prefix)
+}
+
+func (l *Logrws[T]) Close() error {
+	if c, ok := any(l.rws).(io.Closer); ok {
+		log.Printf("%s.Close()", l.prefix)
+		return c.Close()
+	}
+	return fmt.Errorf("%s is not a io.Closer", l.prefix)
 }

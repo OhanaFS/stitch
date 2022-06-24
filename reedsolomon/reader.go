@@ -3,6 +3,9 @@ package reedsolomon
 import (
 	"bytes"
 	"io"
+	"log"
+
+	"github.com/OhanaFS/stitch/util/debug"
 )
 
 // ReadSeeker implements the io.ReadSeeker interface for Reed-Solomon encoded
@@ -59,6 +62,8 @@ func (r *ReadSeeker) Read(p []byte) (int, error) {
 		return 0, err
 	}
 
+	debug.Hexdump(buf.Bytes(), "rs:reader:buf")
+
 	// Write the data to the output
 	buf.Next(int(r.bytesToDiscard))
 	n, err := buf.Read(p)
@@ -76,8 +81,10 @@ func (r *ReadSeeker) Seek(offset int64, whence int) (int64, error) {
 	if whence == io.SeekCurrent {
 		offset += r.currentOffset
 	} else if whence == io.SeekEnd {
-		offset = r.outSize - offset
+		offset = r.outSize + offset
 	}
+
+	log.Printf("[rs] Seek to %d (max %d)", offset, r.outSize)
 
 	// Calculate the offset for each shard
 	blockSize := int64(r.encoder.BlockSize)
@@ -88,6 +95,11 @@ func (r *ReadSeeker) Seek(offset int64, whence int) (int64, error) {
 
 	r.currentOffset = offset
 	r.bytesToDiscard = offset - (block * blockSize * dataShards)
+
+	log.Printf(
+		"[rs] Seeking to block %d, shard offset %d, discarding %d bytes after",
+		block, shardOffset, r.bytesToDiscard,
+	)
 
 	// Seek each shard
 	for _, shard := range r.shards {
