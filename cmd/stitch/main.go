@@ -12,6 +12,7 @@ import (
 var subcommands = map[string]*flag.FlagSet{
 	cmd.ReedsolomonCmd.Name(): cmd.ReedsolomonCmd,
 	cmd.PipelineCmd.Name():    cmd.PipelineCmd,
+	cmd.BenchCmd.Name():       cmd.BenchCmd,
 }
 
 func run() int {
@@ -38,6 +39,8 @@ func run() int {
 		return cmd.RunReedSolomonCmd()
 	case cmd.PipelineCmd.Name():
 		return cmd.RunPipelineCmd()
+	case cmd.BenchCmd.Name():
+		return cmd.RunBenchCmd()
 	}
 
 	return 0
