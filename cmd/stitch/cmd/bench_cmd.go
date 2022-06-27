@@ -26,11 +26,12 @@ func RunBenchCmd() int {
 	runBench := func(dataShards, parityShards int) (time.Duration, error) {
 		// Create the inputs and outputs
 		input := &util.RandomReader{Size: int64(*bInputSize)}
+
 		shards := make([]*util.Membuf, dataShards+parityShards)
 		shardWriters := make([]io.Writer, dataShards+parityShards)
 		shardReadSeekers := make([]io.ReadSeeker, dataShards+parityShards)
 		for i := 0; i < dataShards+parityShards; i++ {
-			shards[i] = &util.Membuf{}
+			shards[i] = util.NewMembuf()
 			shardWriters[i] = shards[i]
 			shardReadSeekers[i] = shards[i]
 		}

@@ -5,7 +5,8 @@ import (
 	"math/rand"
 )
 
-// RandomReader is a io.Reader that returns random bytes.
+// RandomReader is a io.Reader that returns random bytes. This uses math/rand
+// to generate random bytes and should not be used for security purposes.
 type RandomReader struct {
 	// Size is the size of the file.
 	Size int64

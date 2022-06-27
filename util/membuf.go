@@ -7,8 +7,9 @@ import (
 
 // Membuf is an in-memory buffer that implements the ReadWriteSeeker interface.
 type Membuf struct {
-	buf []byte
-	pos int
+	buf    []byte
+	pos    int
+	length int
 }
 
 // Assert that the Membuf struct satisfies the io.ReadWriteSeeker interface.
@@ -16,25 +17,28 @@ var _ io.ReadWriteSeeker = &Membuf{}
 
 // NewMembuf creates a new Membuf.
 func NewMembuf() *Membuf {
-	return &Membuf{}
+	return &Membuf{buf: make([]byte, 1024)}
 }
 
 func (m *Membuf) Read(p []byte) (n int, err error) {
-	if m.pos >= len(m.buf) {
+	if m.pos >= m.length {
 		return 0, io.EOF
 	}
-	n = copy(p, m.buf[m.pos:])
+	n = copy(p, m.buf[m.pos:m.length])
 	m.pos += n
 	return n, nil
 }
 
 func (m *Membuf) Write(p []byte) (n int, err error) {
-	if m.pos+len(p) > len(m.buf) {
-		m.buf = append(m.buf[:m.pos], p...)
-	} else {
-		copy(m.buf[m.pos:], p)
+	for m.pos+len(p) > len(m.buf) {
+		// Allocate double the size of the buffer if the write would overflow.
+		newbuf := make([]byte, len(m.buf)*2)
+		copy(newbuf, m.buf)
+		m.buf = newbuf
 	}
-	m.pos += len(p)
+	n = copy(m.buf[m.pos:], p)
+	m.pos += n
+	m.length = Max(m.length, m.pos)
 	return len(p), nil
 }
 
@@ -45,7 +49,7 @@ func (m *Membuf) Seek(offset int64, whence int) (int64, error) {
 	case io.SeekCurrent:
 		m.pos += int(offset)
 	case io.SeekEnd:
-		m.pos = len(m.buf) + int(offset)
+		m.pos = m.length + int(offset)
 	default:
 		return 0, fmt.Errorf("invalid whence: %d", whence)
 	}
@@ -53,9 +57,9 @@ func (m *Membuf) Seek(offset int64, whence int) (int64, error) {
 }
 
 func (m *Membuf) Len() int {
-	return len(m.buf)
+	return m.length
 }
 
 func (m *Membuf) Bytes() []byte {
-	return m.buf
+	return m.buf[:m.length]
 }
