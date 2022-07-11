@@ -55,7 +55,7 @@ func RunBenchCmd() int {
 
 		// Set up the reader and writer
 		startTime := time.Now()
-		if err := encoder.Encode(input, shardWriters, key, iv); err != nil {
+		if _, err := encoder.Encode(input, shardWriters, key, iv); err != nil {
 			return 0, err
 		}
 		for _, shard := range shards {

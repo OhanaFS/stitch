@@ -63,33 +63,40 @@ type Encoder struct {
 	opts *EncoderOptions
 }
 
+type EncodingResult struct {
+	// FileSize is the size of the input file in bytes.
+	FileSize uint64
+	// FileHash is the SHA256 hash of the input file.
+	FileHash []byte
+}
+
 func NewEncoder(opts *EncoderOptions) *Encoder {
 	return &Encoder{opts}
 }
 
-func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte, iv []byte) error {
+func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte, iv []byte) (*EncodingResult, error) {
 	totalShards := int(e.opts.DataShards + e.opts.ParityShards)
 
 	// Check if the number of output writers matches the number of shards in the
 	// encoder options.
 	if len(shards) != totalShards {
-		return ErrShardCountMismatch
+		return nil, ErrShardCountMismatch
 	}
 
 	// Prepare a 256-bit AES key to encrypt the data.
 	fileKey := make([]byte, 32)
 	if _, err := rand.Read(fileKey); err != nil {
-		return fmt.Errorf("failed to generate file key: %v", err)
+		return nil, fmt.Errorf("failed to generate file key: %v", err)
 	}
 
 	// Encrypt the file key with the user-supplied key and iv.
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return fmt.Errorf("failed to create AES cipher: %v", err)
+		return nil, fmt.Errorf("failed to create AES cipher: %v", err)
 	}
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
-		return fmt.Errorf("failed to create AES-GCM: %v", err)
+		return nil, fmt.Errorf("failed to create AES-GCM: %v", err)
 	}
 	fileKeyCiphertext := gcm.Seal(nil, iv, fileKey, nil)
 
@@ -98,7 +105,7 @@ func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte, iv []by
 		fileKeyCiphertext, totalShards, int(e.opts.KeyThreshold),
 	)
 	if err != nil {
-		return fmt.Errorf("failed to split file key: %v", err)
+		return nil, fmt.Errorf("failed to split file key: %v", err)
 	}
 
 	// Prepare headers for each shard.
@@ -120,10 +127,10 @@ func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte, iv []by
 		// Write the header to the shard.
 		b, err := headers[i].Encode()
 		if err != nil {
-			return fmt.Errorf("failed to encode header: %v", err)
+			return nil, fmt.Errorf("failed to encode header: %v", err)
 		}
 		if _, err := shards[i].Write(b); err != nil {
-			return fmt.Errorf("failed to write header: %v", err)
+			return nil, fmt.Errorf("failed to write header: %v", err)
 		}
 	}
 
@@ -132,7 +139,7 @@ func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte, iv []by
 		int(e.opts.DataShards), int(e.opts.ParityShards), rsBlockSize,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to create Reed-Solomon encoder: %v", err)
+		return nil, fmt.Errorf("failed to create Reed-Solomon encoder: %v", err)
 	}
 
 	// Prepare the Reed-Solomon writer.
@@ -141,17 +148,17 @@ func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte, iv []by
 	// Prepare the AES writer.
 	wAES, err := aesgcm.NewWriter(wRS, fileKey, aesBlockSize)
 	if err != nil {
-		return fmt.Errorf("failed to create AES writer: %v", err)
+		return nil, fmt.Errorf("failed to create AES writer: %v", err)
 	}
 
 	// Prepare the zstd compressor.
 	encZstd, err := zstd.NewWriter(nil)
 	if err != nil {
-		return fmt.Errorf("failed to create zstd writer: %v", err)
+		return nil, fmt.Errorf("failed to create zstd writer: %v", err)
 	}
 	wZstd, err := seekable.NewWriter(wAES, encZstd)
 	if err != nil {
-		return fmt.Errorf("failed to create zstd writer: %v", err)
+		return nil, fmt.Errorf("failed to create zstd writer: %v", err)
 	}
 
 	// Start encoding
@@ -166,19 +173,18 @@ func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte, iv []by
 			if err == io.EOF {
 				break
 			}
-			return fmt.Errorf("failed to read data: %v", err)
+			return nil, fmt.Errorf("failed to read data: %v", err)
 		}
 		fileSize += uint64(n)
 
 		// Encode
-		if _, err := wZstd.Write(chunk); err != nil {
-			// if _, err := wAES.Write(chunk); err != nil {
-			return err
+		if _, err := wZstd.Write(chunk[:n]); err != nil {
+			return nil, err
 		}
 
 		// Update the hash
-		if _, err := hash.Write(chunk); err != nil {
-			return err
+		if _, err := hash.Write(chunk[:n]); err != nil {
+			return nil, err
 		}
 
 		if n < rsBlockSize {
@@ -188,16 +194,16 @@ func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte, iv []by
 
 	// Close the writers
 	if err := wZstd.Close(); err != nil {
-		return err
+		return nil, err
 	}
 	if err := encZstd.Close(); err != nil {
-		return err
+		return nil, err
 	}
 	if err := wAES.Close(); err != nil {
-		return err
+		return nil, err
 	}
 	if err := wRS.Close(); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Write the complete header to the end of the file.
@@ -205,7 +211,6 @@ func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte, iv []by
 	for i := 0; i < totalShards; i++ {
 		headers[i].FileHash = digest
 		headers[i].FileSize = fileSize
-		// TODO: make this less hacky
 		headers[i].EncryptedSize = wAES.(*aesgcm.AESWriter).GetWritten()
 		headers[i].CompressedSize = wAES.(*aesgcm.AESWriter).GetRead()
 		headers[i].IsComplete = true
@@ -213,14 +218,17 @@ func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte, iv []by
 		// Write the updated header to the end of the shard.
 		b, err := headers[i].Encode()
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if _, err := shards[i].Write(b); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
-	return nil
+	return &EncodingResult{
+		FileSize: fileSize,
+		FileHash: digest,
+	}, nil
 }
 
 // FinalizeHeader rewrites the shard header with the one located at the end of

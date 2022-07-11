@@ -3,6 +3,7 @@ package stitch_test
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
 	"io"
 	"testing"
 
@@ -38,8 +39,16 @@ func TestEncodeDecode(t *testing.T) {
 		key := []byte("11111111222222223333333344444444")
 		iv := []byte("1234567890ab")
 
+		// Hash the data
+		hash := sha256.New()
+		hash.Write(input)
+		fileHash := hash.Sum(nil)
+
 		// Encode the data.
-		assert.NoError(encoder.Encode(inputBuffer, shardWriters, key, iv))
+		res, err := encoder.Encode(inputBuffer, shardWriters, key, iv)
+		assert.NoError(err)
+		assert.Equal(uint64(len(input)), res.FileSize)
+		assert.Equal(fileHash, res.FileHash)
 
 		// Finalize the file headers
 		for _, shard := range shards {

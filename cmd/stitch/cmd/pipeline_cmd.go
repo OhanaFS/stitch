@@ -92,7 +92,7 @@ func RunPipelineCmd() int {
 
 		// Encode the file
 		log.Println("Encoding file...")
-		if err = encoder.Encode(progressReader, shardWriters, key, iv); err != nil {
+		if _, err = encoder.Encode(progressReader, shardWriters, key, iv); err != nil {
 			log.Fatalln("Failed to encode file:", err)
 		}
 		fmt.Println("")
