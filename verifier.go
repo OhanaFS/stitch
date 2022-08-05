@@ -15,8 +15,14 @@ type VerificationResult struct {
 	// AllGood specifies whether all chunks of all shards are readable and has no
 	// issues.
 	AllGood bool
+	// FullyReadable specifies whether it is possible to fully read and/or recover
+	// the file.
+	FullyReadable bool
 	// ByShard contains a breakdown of issues per shard.
 	ByShard []ShardVerificationResult
+	// IrrecoverableBlocks is a slice of block indices that have fewer healthy
+	// shards than is required to recover.
+	IrrecoverableBlocks []int
 }
 
 type ShardVerificationResult struct {
@@ -124,9 +130,10 @@ func VerifyShardIntegrity(shard io.Reader) (*ShardVerificationResult, error) {
 func (e *Encoder) VerifyIntegrity(shards []io.ReadSeeker) (*VerificationResult, error) {
 	totalShards := int(e.opts.DataShards + e.opts.ParityShards)
 	result := &VerificationResult{
-		TotalShards: totalShards,
-		ByShard:     make([]ShardVerificationResult, totalShards),
-		AllGood:     true,
+		TotalShards:   totalShards,
+		ByShard:       make([]ShardVerificationResult, totalShards),
+		AllGood:       true,
+		FullyReadable: true,
 	}
 
 	// Check if there are sufficient input shards
@@ -134,6 +141,7 @@ func (e *Encoder) VerifyIntegrity(shards []io.ReadSeeker) (*VerificationResult, 
 		return nil, ErrNotEnoughShards
 	}
 
+	totalBlocks := 0
 	missingCount := 0
 	shardResults := make([]*ShardVerificationResult, totalShards)
 	for i, shard := range shards {
@@ -149,6 +157,11 @@ func (e *Encoder) VerifyIntegrity(shards []io.ReadSeeker) (*VerificationResult, 
 			result.AllGood = false
 		} else {
 			shardResults[i] = res
+
+			// Sample the total number of blocks to be used later
+			if res.BlocksFound == res.BlocksCount {
+				totalBlocks = res.BlocksFound
+			}
 		}
 	}
 
@@ -165,6 +178,42 @@ func (e *Encoder) VerifyIntegrity(shards []io.ReadSeeker) (*VerificationResult, 
 
 		if res.BlocksCount != res.BlocksFound || len(res.BrokenBlocks) > 0 {
 			result.AllGood = false
+		}
+	}
+
+	// Verify all blocks are readable
+	// Keep track of indices for each shard's BrokenBlocks slice
+	ns := make([]int, totalShards)
+	// Go through each block number
+	for iBlk := 0; iBlk < totalBlocks; iBlk++ {
+		// Count how many damages the current block has suffered
+		blkTally := 0
+		for iShard, res := range shardResults {
+			// Add to the tally if shard is unavailable
+			if res == nil {
+				blkTally++
+				continue
+			}
+			// Skip if array index is out of bounds
+			if ns[iShard] >= len(res.BrokenBlocks) {
+				continue
+			}
+			// Get the block index from the shard's current BrokenBlocks item
+			iBlkSh := res.BrokenBlocks[ns[iShard]]
+			if iBlkSh == iBlk {
+				// Add to the tally if matching
+				blkTally++
+			} else if iBlk > iBlkSh {
+				// If the current block index is greater than the current shard's
+				// BrokenBlocks index, step to the next slice element
+				ns[iShard]++
+			}
+		}
+		// If the block has suffered more damage than is possible to recover, add
+		// the current index to the result slice
+		if blkTally > int(e.opts.ParityShards) {
+			result.IrrecoverableBlocks = append(result.IrrecoverableBlocks, iBlk)
+			result.FullyReadable = false
 		}
 	}
 

@@ -73,11 +73,11 @@ func TestVerify(t *testing.T) {
 	}
 
 	// Damage the shards
-	_, err = shards[1].Seek(1024, io.SeekStart)
+	_, err = shards[1].Seek(1024, io.SeekStart) // Block 0
 	assert.NoError(err)
 	_, err = shards[1].Write([]byte("blah"))
 	assert.NoError(err)
-	_, err = shards[1].Seek(12345, io.SeekStart)
+	_, err = shards[1].Seek(12345, io.SeekStart) // Block 2
 	assert.NoError(err)
 	_, err = shards[1].Write([]byte("asdf"))
 	assert.NoError(err)
@@ -94,14 +94,64 @@ func TestVerify(t *testing.T) {
 		BrokenBlocks:     []int{0, 2},
 	}, *vres)
 
+	// Check all
+	vires, err := encoder.VerifyIntegrity(shardReaders)
+	assert.Nil(err)
+	assert.Equal(3, vires.TotalShards)
+	assert.Equal(false, vires.AllGood)
+	assert.Equal(true, vires.FullyReadable)
+	assert.Equal(3, len(vires.ByShard))
+	assert.Equal(0, len(vires.IrrecoverableBlocks))
+
+	// Damage another shard
+	_, err = shards[2].Seek(1024, io.SeekStart) // Block 0
+	assert.NoError(err)
+	_, err = shards[2].Write([]byte("blah"))
+	assert.NoError(err)
+	_, err = shards[2].Seek(8192, io.SeekStart) // Block 1
+	assert.NoError(err)
+	_, err = shards[2].Write([]byte("blah"))
+	assert.NoError(err)
+
+	shards[2].Seek(0, io.SeekStart)
+	vres, err = stitch.VerifyShardIntegrity(shards[2])
+	assert.NoError(err)
+	assert.Equal(stitch.ShardVerificationResult{
+		IsAvailable:      true,
+		IsHeaderComplete: true,
+		ShardIndex:       2,
+		BlocksCount:      3,
+		BlocksFound:      3,
+		BrokenBlocks:     []int{0, 1},
+	}, *vres)
+
+	// Block 0 should be irrecoverable
+	vires, err = encoder.VerifyIntegrity(shardReaders)
+	assert.Nil(err)
+	assert.Equal(3, vires.TotalShards)
+	assert.Equal(false, vires.AllGood)
+	assert.Equal(false, vires.FullyReadable)
+	assert.Equal(3, len(vires.ByShard))
+	assert.Equal([]int{0}, vires.IrrecoverableBlocks)
+
 	// Damage the header
 	_, err = shards[1].Seek(0, io.SeekStart)
 	assert.NoError(err)
 	_, err = shards[1].Write([]byte("meow meow"))
 	assert.NoError(err)
 
+	// It should fail
 	shards[1].Seek(0, io.SeekStart)
 	vres, err = stitch.VerifyShardIntegrity(shards[1])
 	assert.Nil(vres)
 	assert.Error(err)
+
+	// Overall should still be recoverable except block 0
+	vires, err = encoder.VerifyIntegrity(shardReaders)
+	assert.Nil(err)
+	assert.Equal(3, vires.TotalShards)
+	assert.Equal(false, vires.AllGood)
+	assert.Equal(false, vires.FullyReadable)
+	assert.Equal(3, len(vires.ByShard))
+	assert.Equal([]int{0}, vires.IrrecoverableBlocks)
 }
