@@ -27,10 +27,16 @@ func (e *Encoder) RotateKeys(shards []io.ReadSeeker,
 	}
 
 	// Combine the header keys to get the encrypted file key.
-	_, err = combineHeaderKeys(headers, previousKey, previousIv)
+	fileKey, err := combineHeaderKeys(headers, previousKey, previousIv)
 	if err != nil {
 		return nil, fmt.Errorf("failed to combine header keys: %v", err)
 	}
 
-	return nil, nil
+	// Split the file key with the new key.
+	keySplits, err := splitFileKey(fileKey, newKey, newIv, totalShards, int(e.opts.KeyThreshold))
+	if err != nil {
+		return nil, fmt.Errorf("failed to split file key: %v", err)
+	}
+
+	return keySplits, nil
 }

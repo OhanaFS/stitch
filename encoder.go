@@ -17,6 +17,31 @@ import (
 	"github.com/klauspost/compress/zstd"
 )
 
+// splitFileKey encrypts the file key with the given key and iv, and splits it
+// into the given number of shards.
+func splitFileKey(fileKey, key, iv []byte, shards, threshold int) ([][]byte, error) {
+	// Encrypt the file key with the given key and iv.
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create AES cipher: %v", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create AES-GCM: %v", err)
+	}
+	fileKeyCiphertext := gcm.Seal(nil, iv, fileKey, nil)
+
+	// Split the key into shards.
+	fileKeySplit, err := shamir.Split(
+		fileKeyCiphertext, shards, threshold,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate parts: %v", err)
+	}
+
+	return fileKeySplit, nil
+}
+
 // Encode takes in a reader, performs the transformations and then splits the
 // data into multiple shards, writing them to the output writers. The output
 // writers are not closed after the data is written.
@@ -39,21 +64,8 @@ func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte, iv []by
 		return nil, fmt.Errorf("failed to generate file key: %v", err)
 	}
 
-	// Encrypt the file key with the user-supplied key and iv.
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create AES cipher: %v", err)
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create AES-GCM: %v", err)
-	}
-	fileKeyCiphertext := gcm.Seal(nil, iv, fileKey, nil)
-
-	// Split the key into shards.
-	fileKeySplit, err := shamir.Split(
-		fileKeyCiphertext, totalShards, int(e.opts.KeyThreshold),
-	)
+	// Encrypt and split the key into the number of shards.
+	fileKeySplit, err := splitFileKey(fileKey, key, iv, totalShards, int(e.opts.KeyThreshold))
 	if err != nil {
 		return nil, fmt.Errorf("failed to split file key: %v", err)
 	}
