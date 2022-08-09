@@ -3,6 +3,8 @@ package reedsolomon
 import (
 	"bytes"
 	"io"
+
+	"github.com/OhanaFS/stitch/util"
 )
 
 // ReadSeeker implements the io.ReadSeeker interface for Reed-Solomon encoded
@@ -21,12 +23,12 @@ type ReadSeeker struct {
 
 // NewReadSeeker returns a new ReaderSeeker
 func NewReadSeeker(encoder *Encoder, shards []io.ReadSeeker, outSize int64) io.ReadSeeker {
-	return &ReadSeeker{
+	return util.NewLimitReader(&ReadSeeker{
 		encoder:       encoder,
 		shards:        shards,
 		outSize:       outSize,
 		currentOffset: 0,
-	}
+	}, outSize)
 }
 
 func (r *ReadSeeker) Read(p []byte) (int, error) {
