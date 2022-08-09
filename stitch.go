@@ -16,6 +16,7 @@ var (
 	ErrNonSeekableWriter  = errors.New("shards must support seeking")
 	ErrNotEnoughKeyShards = errors.New("not enough shards to reconstruct the file key")
 	ErrNotEnoughShards    = errors.New("not enough shards to reconstruct the file")
+	ErrNoCompleteHeader   = errors.New("no complete header found")
 )
 
 // EncoderOptions specifies options for the Encoder.
