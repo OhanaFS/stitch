@@ -8,7 +8,13 @@ make
 
 # Testing
 make test
+
+# View documentation
+make doc
 ```
+
+Once you've executed `make doc`, you can view the documentation with your
+browser at http://localhost:6060/pkg/github.com/OhanaFS/stitch/
 
 ## How it works
 
@@ -74,7 +80,7 @@ Check the Go FAQ on
      })
 
      err := enc.Encode(
-
+       reader,
      )
      if err != nil {
        panic(err)
