@@ -33,7 +33,8 @@ func (e *Encoder) RotateKeys(shards []io.ReadSeeker,
 	}
 
 	// Split the file key with the new key.
-	keySplits, err := splitFileKey(fileKey, newKey, newIv, totalShards, int(e.opts.KeyThreshold))
+	keySplits, err := splitFileKey(fileKey, newKey, newIv,
+		totalShards, int(e.opts.KeyThreshold))
 	if err != nil {
 		return nil, fmt.Errorf("failed to split file key: %v", err)
 	}
