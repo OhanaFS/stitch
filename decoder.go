@@ -16,50 +16,62 @@ import (
 	"github.com/klauspost/compress/zstd"
 )
 
-func (e *Encoder) NewReadSeeker(shards []io.ReadSeeker, key []byte, iv []byte) (io.ReadSeeker, error) {
-	totalShards := int(e.opts.DataShards + e.opts.ParityShards)
-
-	// Check if there are sufficient input shards
-	if len(shards) < int(e.opts.DataShards) {
-		return nil, ErrNotEnoughShards
-	}
+// readHeader reads the header from the shards. It returns the index of any
+// complete header, a slice of the headers, and a slice of correctly-positioned
+// readers.
+//
+// The slice of headers is not necessarily in the same order as the shards.
+func readHeader(shards []io.ReadSeeker, totalShards int) (
+	okIdx int, headers []header.Header, shardReaders []io.ReadSeeker, err error,
+) {
+	// Allocate a buffer to read the header into.
+	headerBuf := make([]byte, header.HeaderSize)
+	// Create a slice to hold the headers.
+	headers = make([]header.Header, totalShards)
+	// Create a slice to hold the correctly-indexed shard readers.
+	shardReaders = make([]io.ReadSeeker, totalShards)
+	// okIdx is the index of any shard that has a valid header.
+	okIdx = -1
 
 	// Seek to the beginning of each shard.
 	for i, shard := range shards {
-		if _, err := shard.Seek(0, io.SeekStart); err != nil {
-			return nil, fmt.Errorf("failed to seek to beginning of shard %d: %v", i, err)
+		if _, e := shard.Seek(0, io.SeekStart); e != nil {
+			err = fmt.Errorf("failed to seek to beginning of shard %d: %v", i, e)
+			return
 		}
 	}
 
-	// Try to read the header from a shard.
-	headerBuf := make([]byte, header.HeaderSize)
-	headers := make([]header.Header, totalShards)
-	shardReaders := make([]io.ReadSeeker, totalShards)
-	hdr := header.Header{}
 	for i, shard := range shards {
+		// Try to read the shard
 		if _, err := shard.Read(headerBuf); err != nil {
 			continue
 		}
+
+		// Try to parse the header.
 		if err := headers[i].Decode(headerBuf); err != nil {
 			continue
 		}
+
+		// If the header is valid, set the okIdx and append the shard to the shard
+		// readers slice, according to the index in the header.
 		if headers[i].IsComplete && headers[i].ShardIndex < totalShards {
 			shardReaders[headers[i].ShardIndex] = shard
-
-			// Sample a complete header
-			hdr = headers[i]
+			okIdx = i
 		}
 	}
 
-	// Pad nil readers
-	for i, reader := range shardReaders {
-		if reader == nil {
-			log.Printf("[WARN] Missing shard %d", i)
-			shardReaders[i] = &util.ZeroReadSeeker{Size: int64(hdr.EncryptedSize)}
-		}
+	// Return an error if no valid header was found.
+	if okIdx == -1 {
+		err = ErrNoCompleteHeader
 	}
 
-	// Reconstruct the file key from the headers.
+	return
+}
+
+// combineHeaderKeys combines the keys from the header and decrypts it with the
+// supplied key and iv.
+func combineHeaderKeys(headers []header.Header, key, iv []byte) ([]byte, error) {
+	// Gather the key pieces into a slice of byte slices.
 	var fileKeyPieces [][]byte
 	for _, h := range headers {
 		if !h.IsComplete {
@@ -67,14 +79,11 @@ func (e *Encoder) NewReadSeeker(shards []io.ReadSeeker, key []byte, iv []byte) (
 		}
 		fileKeyPieces = append(fileKeyPieces, h.FileKey)
 	}
-	if len(fileKeyPieces) < int(e.opts.KeyThreshold) {
-		return nil, ErrNotEnoughKeyShards
-	}
 
-	// Combine the file key pieces.
-	fileKeyCiphertext, err := shamir.Combine(fileKeyPieces)
+	// Combine the key pieces into a single encrypted key.
+	ciphertext, err := shamir.Combine(fileKeyPieces)
 	if err != nil {
-		return nil, fmt.Errorf("failed to combine file key pieces: %v", err)
+		return nil, fmt.Errorf("failed to combine header keys: %v", err)
 	}
 
 	// Decrypt the file key with the user-supplied key.
@@ -86,9 +95,45 @@ func (e *Encoder) NewReadSeeker(shards []io.ReadSeeker, key []byte, iv []byte) (
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gcm cipher for file key: %v", err)
 	}
-	fileKey, err := gcm.Open(nil, iv, fileKeyCiphertext, nil)
+	fileKey, err := gcm.Open(nil, iv, ciphertext, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt file key: %v", err)
+	}
+
+	return fileKey, nil
+}
+
+// NewReadSeeker returns a new ReadSeeker that can be used to access the data
+// contained within the shards.
+func (e *Encoder) NewReadSeeker(shards []io.ReadSeeker, key []byte, iv []byte) (
+	io.ReadSeeker, error,
+) {
+	totalShards := int(e.opts.DataShards + e.opts.ParityShards)
+
+	// Check if there are sufficient input shards
+	if len(shards) < int(e.opts.DataShards) {
+		return nil, ErrNotEnoughShards
+	}
+
+	// Try to read the shard headers.
+	okIdx, headers, shardReaders, err := readHeader(shards, totalShards)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read header: %v", err)
+	}
+	hdr := headers[okIdx]
+
+	// Pad nil readers
+	for i, reader := range shardReaders {
+		if reader == nil {
+			log.Printf("[WARN] Missing shard %d", i)
+			shardReaders[i] = &util.ZeroReadSeeker{Size: int64(hdr.EncryptedSize)}
+		}
+	}
+
+	// Reconstruct and decrypt the encrypted file key from the headers.
+	fileKey, err := combineHeaderKeys(headers, key, iv)
+	if err != nil {
+		return nil, fmt.Errorf("failed to combine file key pieces: %v", err)
 	}
 
 	// Seek shards to beginning of data.

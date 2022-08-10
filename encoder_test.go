@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
+	"fmt"
 	"io"
+	"os"
 	"testing"
 
 	"github.com/OhanaFS/stitch"
@@ -12,6 +14,39 @@ import (
 	"github.com/OhanaFS/stitch/util/debug"
 	"github.com/stretchr/testify/assert"
 )
+
+// A simple example to demonstrate how to use the Encoder and ReadSeeker.
+func Example() {
+	// Create a new encoder.
+	encoder := stitch.NewEncoder(&stitch.EncoderOptions{
+		DataShards:   2,
+		ParityShards: 1,
+		KeyThreshold: 2,
+	})
+
+	// Open the input file.
+	input, _ := os.Open("input.txt")
+	defer input.Close()
+
+	// Open the output files.
+	out1, _ := os.Create("output.shard1")
+	defer out1.Close()
+	out2, _ := os.Create("output.shard2")
+	defer out2.Close()
+
+	// Use a dummy key and IV.
+	key := []byte("00000000000000000000000000000000")
+	iv := []byte("000000000000")
+
+	// Encode the data.
+	result, _ := encoder.Encode(input, []io.Writer{out1, out2}, key, iv)
+	fmt.Printf("File size: %d\n", result.FileSize)
+	fmt.Printf("File hash: %x\n", result.FileHash)
+
+	// Decode the data.
+	reader, _ := encoder.NewReadSeeker([]io.ReadSeeker{out1, out2}, key, iv)
+	io.Copy(os.Stdout, reader)
+}
 
 func TestEncodeDecode(t *testing.T) {
 	assert := assert.New(t)
