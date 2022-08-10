@@ -52,9 +52,21 @@ func TestRotateKeys(t *testing.T) {
 	assert.NoError(encoder.FinalizeHeader(out3))
 
 	// Rotate the keys.
-	_, err = encoder.RotateKeys(
+	newKeySplits, err := encoder.RotateKeys(
 		[]io.ReadSeeker{out1, out2, out3},
 		key1, iv1, key2, iv2,
+	)
+	assert.NoError(err)
+
+	// Update the shard headers with the new key.
+	assert.NoError(encoder.UpdateShardKey(out1, newKeySplits[0]))
+	assert.NoError(encoder.UpdateShardKey(out2, newKeySplits[1]))
+	assert.NoError(encoder.UpdateShardKey(out3, newKeySplits[2]))
+
+	// Ensure the new key is used for decoding.
+	_, err = encoder.RotateKeys(
+		[]io.ReadSeeker{out1, out2, out3},
+		key2, iv2, key1, iv1,
 	)
 	assert.NoError(err)
 }
