@@ -141,12 +141,12 @@ func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte, iv []by
 
 		// Encode
 		if _, err := wZstd.Write(chunk[:n]); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to write to compressor: %v", err)
 		}
 
 		// Update the hash
 		if _, err := hash.Write(chunk[:n]); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to hash chunk: %v", err)
 		}
 
 		if n < rsBlockSize {
@@ -156,16 +156,16 @@ func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte, iv []by
 
 	// Close the writers
 	if err := wZstd.Close(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to close compressor writer: %v", err)
 	}
 	if err := encZstd.Close(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to close compressor encoder: %v", err)
 	}
 	if err := wAES.Close(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to close aes writer: %v", err)
 	}
 	if err := wRS.Close(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to close reed-solomon writer: %v", err)
 	}
 
 	// Write the complete header to the end of the file.
@@ -180,10 +180,10 @@ func (e *Encoder) Encode(data io.Reader, shards []io.Writer, key []byte, iv []by
 		// Write the updated header to the end of the shard.
 		b, err := headers[i].Encode()
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to encode header: %v", err)
 		}
 		if _, err := shards[i].Write(b); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to write header: %v", err)
 		}
 	}
 
