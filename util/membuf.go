@@ -20,6 +20,11 @@ func NewMembuf() *Membuf {
 	return &Membuf{buf: make([]byte, 1024)}
 }
 
+// NewMembufN creates a new Membuf with N bytes allocated.
+func NewMembufN(n int) *Membuf {
+	return &Membuf{buf: make([]byte, n)}
+}
+
 func (m *Membuf) Read(p []byte) (n int, err error) {
 	if m.pos >= m.length {
 		return 0, io.EOF

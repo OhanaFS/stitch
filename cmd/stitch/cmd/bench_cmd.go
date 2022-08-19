@@ -31,7 +31,7 @@ func RunBenchCmd() int {
 		shardWriters := make([]io.Writer, dataShards+parityShards)
 		shardReadSeekers := make([]io.ReadSeeker, dataShards+parityShards)
 		for i := 0; i < dataShards+parityShards; i++ {
-			shards[i] = util.NewMembuf()
+			shards[i] = util.NewMembufN(int(float64(*bInputSize / *bDataShards) * 1.5))
 			shardWriters[i] = shards[i]
 			shardReadSeekers[i] = shards[i]
 		}
