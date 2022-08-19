@@ -23,7 +23,7 @@ var (
 func RunBenchCmd() int {
 	log.Printf("Running benchmark with %d data shards, %d parity shards, and %d threads", *bDataShards, *bParityShards, *bThreads)
 
-	runBench := func(dataShards, parityShards int) (time.Duration, error) {
+	runBench := func(dataShards, parityShards int) (time.Duration, time.Duration, error) {
 		// Create the inputs and outputs
 		input := &util.RandomReader{Size: int64(*bInputSize)}
 
@@ -47,49 +47,56 @@ func RunBenchCmd() int {
 		key := make([]byte, 32)
 		iv := make([]byte, 12)
 		if _, err := rand.Read(key); err != nil {
-			return 0, err
+			return 0, 0, err
 		}
 		if _, err := rand.Read(iv); err != nil {
-			return 0, err
+			return 0, 0, err
 		}
 
 		// Set up the reader and writer
 		startTime := time.Now()
 		if _, err := encoder.Encode(input, shardWriters, key, iv); err != nil {
-			return 0, err
+			return 0, 0, err
 		}
 		for _, shard := range shards {
 			encoder.FinalizeHeader(shard)
 		}
+		encodeTime := time.Since(startTime)
+
+		startTime = time.Now()
 		r, err := encoder.NewReadSeeker(shardReadSeekers, key, iv)
 		if err != nil {
-			return 0, err
+			return 0, 0, err
 		}
 		n, err := io.Copy(io.Discard, r)
 		if err != nil {
-			return 0, err
+			return 0, 0, err
 		}
 		if n != int64(*bInputSize) {
-			return 0, err
+			return 0, 0, err
 		}
-		return time.Since(startTime), nil
+		decodeTime := time.Since(startTime)
+
+		return encodeTime, decodeTime, nil
 	}
 
 	// Run the benchmark for each thread
-	var durations []time.Duration
+	var durationsEncode []time.Duration
+	var durationsDecode []time.Duration
 	var lock sync.Mutex
 	var wg sync.WaitGroup
 	for i := 0; i < *bThreads; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			duration, err := runBench(*bDataShards, *bParityShards)
+			durEnc, durDec, err := runBench(*bDataShards, *bParityShards)
 			if err != nil {
 				log.Printf("Error running benchmark: %v", err)
 				return
 			}
 			lock.Lock()
-			durations = append(durations, duration)
+			durationsEncode = append(durationsEncode, durEnc)
+			durationsDecode = append(durationsDecode, durDec)
 			lock.Unlock()
 		}()
 	}
@@ -98,15 +105,20 @@ func RunBenchCmd() int {
 	wg.Wait()
 
 	// Report the results
-	var totalDuration time.Duration
-	for _, duration := range durations {
-		totalDuration += duration
+	var totalDurationEnc time.Duration
+	var totalDurationDec time.Duration
+	for i := range durationsEncode {
+		totalDurationEnc += durationsEncode[i]
+		totalDurationDec += durationsDecode[i]
 	}
-	var averageDuration time.Duration = totalDuration / time.Duration(*bThreads)
+	var averageEncode time.Duration = totalDurationEnc / time.Duration(*bThreads)
+	var averageDecode time.Duration = totalDurationDec / time.Duration(*bThreads)
 
-	// Calculate speed
-	var speed = int64(float64(*bInputSize) * float64(*bThreads) / averageDuration.Seconds())
-	log.Printf("Average duration: %v, speed: %s/s", averageDuration, util.FormatSize(speed))
+	// Calculate speedEncode
+	var speedEncode = int64(float64(*bInputSize) * float64(*bThreads) / averageEncode.Seconds())
+	var speedDecode = int64(float64(*bInputSize) * float64(*bThreads) / averageDecode.Seconds())
+	log.Printf("Average encode: %v, speed: %s/s", averageEncode, util.FormatSize(speedEncode))
+	log.Printf("Average decode: %v, speed: %s/s", averageDecode, util.FormatSize(speedDecode))
 
 	return 0
 }
